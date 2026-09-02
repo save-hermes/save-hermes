@@ -21,10 +21,12 @@ log = logging.getLogger("email_client")
 
 
 def configured() -> bool:
-    return bool(config.EMAIL_ADDRESS and config.EMAIL_APP_PASSWORD)
+    # Envio: Resend (chave) OU SMTP (caixa). Leitura: sempre IMAP (caixa).
+    has_send = bool(config.RESEND_API_KEY) or bool(config.EMAIL_ADDRESS and config.EMAIL_APP_PASSWORD)
+    return bool(config.EMAIL_ADDRESS) and has_send
 
 
-# ─────────────────────────── Envio (SMTP) ───────────────────────────
+# ─────────────────────────── Envio (roteia Resend/SMTP) ───────────────────────────
 
 def send(
     to_addr: str,
@@ -33,13 +35,11 @@ def send(
     in_reply_to: str | None = None,
     references: str | None = None,
 ) -> dict:
-    """Envia um e-mail de texto. Devolve {ok, message_id, error}.
+    """Envia um e-mail de texto. Usa Resend se houver RESEND_API_KEY, senão SMTP.
 
     in_reply_to/references mantêm o threading quando é uma RESPOSTA a um e-mail
     existente (o cliente do lead agrupa na mesma conversa).
     """
-    if not configured():
-        return {"ok": False, "error": "email_not_configured"}
     if not to_addr:
         return {"ok": False, "error": "no_recipient"}
 
@@ -48,6 +48,49 @@ def send(
     if config.EMAIL_SIGNATURE and config.EMAIL_SIGNATURE not in full_body:
         full_body = f"{full_body}\n\n{config.EMAIL_SIGNATURE}"
 
+    if config.RESEND_API_KEY:
+        return _send_resend(to_addr, subject, full_body, in_reply_to, references)
+    return _send_smtp(to_addr, subject, full_body, in_reply_to, references)
+
+
+def _send_resend(to_addr, subject, full_body, in_reply_to, references) -> dict:
+    """Envio via API do Resend (HTTP). Deliverability alta + logs no painel Resend."""
+    import httpx
+    frm = config.RESEND_FROM or formataddr((config.EMAIL_FROM_NAME, config.EMAIL_ADDRESS))
+    payload = {
+        "from": frm,
+        "to": [to_addr],
+        "subject": subject,
+        "text": full_body,
+    }
+    headers = {}
+    if in_reply_to:
+        headers["In-Reply-To"] = in_reply_to
+        headers["References"] = (references + " " if references else "") + in_reply_to
+    if headers:
+        payload["headers"] = headers
+    try:
+        r = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {config.RESEND_API_KEY}",
+                     "Content-Type": "application/json"},
+            json=payload, timeout=30,
+        )
+        if r.status_code >= 300:
+            log.error("Resend recusou (%s): %s", r.status_code, r.text[:200])
+            return {"ok": False, "error": f"resend_{r.status_code}: {r.text[:150]}"}
+        data = r.json()
+        log.info("E-mail enviado via Resend para %s (id=%s)", to_addr, data.get("id"))
+        return {"ok": True, "message_id": data.get("id"), "provider": "resend"}
+    except Exception as e:  # noqa: BLE001
+        log.error("Falha Resend para %s: %s", to_addr, e)
+        return {"ok": False, "error": f"resend: {e}"}
+
+
+def _send_smtp(to_addr, subject, full_body, in_reply_to, references) -> dict:
+    """Envio via SMTP da caixa do domínio (fallback quando não há Resend)."""
+    if not (config.EMAIL_ADDRESS and config.EMAIL_APP_PASSWORD):
+        return {"ok": False, "error": "email_not_configured"}
     msg = MIMEMultipart("alternative")
     msg["From"] = formataddr((config.EMAIL_FROM_NAME, config.EMAIL_ADDRESS))
     msg["To"] = to_addr
@@ -58,7 +101,6 @@ def send(
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = (references + " " if references else "") + in_reply_to
     msg.attach(MIMEText(full_body, "plain", "utf-8"))
-
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as s:
@@ -66,10 +108,10 @@ def send(
             s.starttls(context=ctx)
             s.login(config.EMAIL_ADDRESS, config.EMAIL_APP_PASSWORD)
             s.sendmail(config.EMAIL_ADDRESS, [to_addr], msg.as_string())
-        log.info("E-mail enviado para %s (subj=%r)", to_addr, subject)
-        return {"ok": True, "message_id": msg_id}
+        log.info("E-mail enviado via SMTP para %s (subj=%r)", to_addr, subject)
+        return {"ok": True, "message_id": msg_id, "provider": "smtp"}
     except Exception as e:  # noqa: BLE001
-        log.error("Falha ao enviar e-mail para %s: %s", to_addr, e)
+        log.error("Falha SMTP para %s: %s", to_addr, e)
         return {"ok": False, "error": str(e)}
 
 

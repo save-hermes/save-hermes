@@ -83,6 +83,20 @@ EMAIL_SIGNATURE = os.getenv(
 # Limite diário de e-mails enviados (deliverability/anti-spam). 0 = sem limite.
 EMAIL_DAILY_LIMIT = int(os.getenv("EMAIL_DAILY_LIMIT", "50"))
 
+# === Resend (provedor de ENVIO de e-mail — opcional) ===
+# Se RESEND_API_KEY estiver preenchida, o envio usa a API do Resend (deliverability
+# alta + logs de entrega/abertura). Caso contrário, cai no SMTP da caixa (híbrido:
+# a LEITURA continua sempre por IMAP). Chave em resend.com/api-keys.
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+# Remetente usado no Resend (precisa ser de um domínio verificado no Resend).
+# Se vazio, usa EMAIL_ADDRESS. Ex.: "Vanessa | Save Educação <vanessa@saveeducacao.com.br>".
+RESEND_FROM = os.getenv("RESEND_FROM", "").strip()
+
+
+def email_send_provider() -> str:
+    """Qual provedor de envio está ativo agora: 'resend' se houver chave, senão 'smtp'."""
+    return "resend" if RESEND_API_KEY else "smtp"
+
 # === Follow-up (cadência de acompanhamento) ===
 # Ativa/desativa o motor de follow-up.
 FOLLOWUP_ENABLED = os.getenv("FOLLOWUP_ENABLED", "true").strip().lower() in ("1", "true", "yes", "sim")

@@ -59,6 +59,7 @@ def health():
         "email": {
             "configured": email_client.configured(),
             "address": config.EMAIL_ADDRESS or None,
+            "send_provider": config.email_send_provider(),
             "sent_today": store.emails_sent_today(),
             "daily_limit": config.EMAIL_DAILY_LIMIT,
         },
