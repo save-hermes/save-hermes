@@ -48,9 +48,15 @@ def send_text(number: str, text: str) -> bool:
     """Envia uma mensagem de texto. `number` = só dígitos (ex.: 5511999998888)."""
     text = _sanitize(text)
     url = f"{config.EVOLUTION_URL}/message/sendText/{config.EVOLUTION_INSTANCE}"
+    # Delay base + jitter aleatório: ritmo humano, reduz padrão de bot (warming).
+    import random
+
+    delay = config.SEND_DELAY_MS
+    if config.SEND_JITTER_MAX_MS > 0:
+        delay += random.randint(config.SEND_JITTER_MIN_MS, config.SEND_JITTER_MAX_MS)
     payload = {"number": number, "text": text}
-    if config.SEND_DELAY_MS > 0:
-        payload["delay"] = config.SEND_DELAY_MS
+    if delay > 0:
+        payload["delay"] = delay
     try:
         r = httpx.post(url, json=payload, headers=_headers(), timeout=30)
         if r.status_code >= 400:

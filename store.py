@@ -94,3 +94,23 @@ def get_history(jid: str, limit: int = 20) -> list[dict]:
             (jid, limit),
         ).fetchall()
     return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
+
+def assistant_msgs_today() -> int:
+    """Quantas mensagens a Vanessa (assistant) já enviou hoje.
+
+    Usado para respeitar o limite diário de aquecimento (warming) do número.
+    """
+    import datetime
+
+    start = int(
+        datetime.datetime.now()
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .timestamp()
+    )
+    with _conn() as c:
+        row = c.execute(
+            "SELECT COUNT(*) FROM messages WHERE role='assistant' AND ts>=?",
+            (start,),
+        ).fetchone()
+    return int(row[0]) if row else 0

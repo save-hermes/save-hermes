@@ -9,6 +9,7 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import evolution
@@ -19,6 +20,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("app")
 
 app = FastAPI(title="WhatsApp Sales Agent")
+
+# A extensão do Chrome (WhatsApp Web) faz POST /reply de outra origem.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://web.whatsapp.com"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
@@ -80,24 +89,16 @@ def _extract(data: dict) -> dict | None:
     }
 
 
-@app.post("/webhook")
-async def webhook(request: Request):
-    # 1) Autenticação simples por token na query string
-    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+def _process(info: dict, deliver: bool) -> dict:
+    """Lógica central compartilhada pelos dois canais (Evolution e extensão).
 
-    body = await request.json()
-    event = body.get("event", "")
+    `deliver=True`  -> o agente ENVIA a resposta pela Evolution (canal webhook).
+    `deliver=False` -> o agente NÃO envia; devolve o texto em `reply` para quem
+                       chamou (a extensão do Chrome digita e envia no WhatsApp Web).
 
-    # Só nos importa mensagem recebida
-    if event not in ("messages.upsert", "MESSAGES_UPSERT"):
-        return {"ignored": event}
-
-    info = _extract(body)
-    if not info:
-        return {"ignored": "no-actionable-message"}
-
-    # 2) Idempotência — Evolution pode reenviar o mesmo evento
+    Retorna sempre um dict serializável com o resultado.
+    """
+    # Idempotência — mesmo evento pode chegar 2x
     if store.already_processed(info["msg_id"]):
         return {"ok": True, "dup": True}
 
@@ -106,24 +107,35 @@ async def webhook(request: Request):
     who = "ADMIN" if is_admin else (info["name"] or info["number"])
     log.info("%s (%s): %s", who, jid, info["text"][:80])
 
-    # 3) Registra lead + mensagem do usuário
+    # Registra lead + mensagem do usuário
     store.get_or_create_lead(jid, info["number"], info["name"])
     store.add_message(jid, "user", info["text"])
 
-    # 4) Chama o cérebro (canal de admin usa prompt de bastidor)
+    # Limite diário de envio (warming) — admin nunca é limitado.
+    if not is_admin and config.DAILY_SEND_LIMIT > 0:
+        sent_today = store.assistant_msgs_today()
+        if sent_today >= config.DAILY_SEND_LIMIT:
+            log.warning(
+                "Limite diário atingido (%s/%s). Pulando resposta a %s.",
+                sent_today, config.DAILY_SEND_LIMIT, info["number"],
+            )
+            return {"ok": True, "skipped": "daily_limit_reached"}
+
+    # Cérebro (canal de admin usa prompt de bastidor)
     history = store.get_history(jid, limit=20)
     answer = reply(history, lead_name=info["name"], is_admin=is_admin)
 
-    # 5) Detecta handoff (não se aplica ao próprio admin)
+    # Handoff (não se aplica ao próprio admin)
     handoff = (config.HANDOFF_MARKER in answer) and not is_admin
     if config.HANDOFF_MARKER in answer:
         answer = answer.replace(config.HANDOFF_MARKER, "").strip()
 
-    # 6) Responde e grava
-    evolution.send_text(info["number"], answer)
+    # Entrega e gravação
+    if deliver:
+        evolution.send_text(info["number"], answer)
     store.add_message(jid, "assistant", answer)
 
-    # 7) Atualiza status e avisa o dono se for lead quente
+    # Status + aviso ao dono se lead quente
     if is_admin:
         store.set_status(jid, "admin")
     elif handoff:
@@ -137,4 +149,58 @@ async def webhook(request: Request):
     else:
         store.set_status(jid, "qualificado")
 
-    return {"ok": True, "handoff": handoff, "admin": is_admin}
+    return {"ok": True, "reply": answer, "handoff": handoff, "admin": is_admin}
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    """Canal Evolution API: recebe messages.upsert e ENVIA a resposta sozinho."""
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    body = await request.json()
+    event = body.get("event", "")
+    if event not in ("messages.upsert", "MESSAGES_UPSERT"):
+        return {"ignored": event}
+
+    info = _extract(body)
+    if not info:
+        return {"ignored": "no-actionable-message"}
+
+    result = _process(info, deliver=True)
+    # No canal Evolution não devolvemos o texto (o agente já enviou)
+    result.pop("reply", None)
+    return result
+
+
+@app.post("/reply")
+async def reply_endpoint(request: Request):
+    """Canal Extensão Chrome (WhatsApp Web): recebe a mensagem já normalizada e
+    DEVOLVE o texto da resposta para a extensão digitar e enviar na página.
+
+    Payload esperado (JSON):
+      { "msg_id": "...", "number": "5547...", "name": "Fulano", "text": "oi" }
+    Só conversas 1:1 — a extensão não deve enviar grupos.
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    number = "".join(ch for ch in (body.get("number") or "") if ch.isdigit())
+    if not text or not number:
+        return {"ignored": "no-actionable-message"}
+
+    # Segurança: rejeita grupos mesmo que a extensão mande por engano
+    jid = body.get("jid") or f"{number}@s.whatsapp.net"
+    if jid.endswith("@g.us") or "status@broadcast" in jid:
+        return {"ignored": "group-or-broadcast"}
+
+    info = {
+        "msg_id": body.get("msg_id") or f"{number}:{hash(text) & 0xffffffff}",
+        "jid": jid,
+        "number": number,
+        "name": (body.get("name") or "").strip(),
+        "text": text,
+    }
+    return _process(info, deliver=False)

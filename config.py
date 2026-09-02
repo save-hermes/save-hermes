@@ -29,6 +29,15 @@ OWNER_NOTIFY_NUMBER = os.getenv("OWNER_NOTIFY_NUMBER", "").strip()
 ADMIN_NUMBER = os.getenv("ADMIN_NUMBER", "").strip()
 SEND_DELAY_MS = int(os.getenv("SEND_DELAY_MS", "1200"))
 DB_PATH = os.getenv("DB_PATH", "/data/leads.db").strip()
+
+# === Aquecimento (warming) — reduz risco de ban do número ===
+# Limite de mensagens que a Vanessa envia por dia. Comece BAIXO num número novo
+# (ex.: 30) e suba gradualmente ao longo de semanas. 0 = sem limite.
+DAILY_SEND_LIMIT = int(os.getenv("DAILY_SEND_LIMIT", "40"))
+# Delay aleatório extra (ms) antes de enviar, além do SEND_DELAY_MS, para o ritmo
+# parecer humano (não responder sempre no mesmo tempo exato).
+SEND_JITTER_MIN_MS = int(os.getenv("SEND_JITTER_MIN_MS", "800"))
+SEND_JITTER_MAX_MS = int(os.getenv("SEND_JITTER_MAX_MS", "3500"))
 # Link de checkout/pagamento do curso (para a IA fechar a venda). Se vazio, a IA
 # faz handoff quando o lead quiser pagar.
 CHECKOUT_URL = os.getenv("CHECKOUT_URL", "").strip()
