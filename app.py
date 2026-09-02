@@ -263,7 +263,8 @@ def _ig_valid_signature(raw: bytes, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 
 
-def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id: str = "") -> dict:
+def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id: str = "",
+                post_context: str = "") -> dict:
     """Cérebro compartilhado para eventos do Instagram.
 
     kind: 'dm' (mensagem no Direct) | 'comment' (comentário em post).
@@ -287,16 +288,17 @@ def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id
 
     if kind == "comment":
         mode = config.IG_COMMENT_MODE
+        pctx = f"Contexto do post onde a pessoa comentou (legenda/tema): {post_context}" if post_context else ""
         # Resposta pública (curta) — se o modo inclui 'public'
         if mode in ("public", "both"):
-            pub = reply(history, lead_name=name, channel="ig_comment_public")
+            pub = reply(history, lead_name=name, channel="ig_comment_public", extra_context=pctx)
             pub = pub.replace(config.HANDOFF_MARKER, "").strip()
             if comment_id and pub:
                 instagram.reply_comment(comment_id, pub)
                 store.add_message(jid, "assistant", f"[público] {pub}")
         # DM privado (detalhe) — se o modo inclui 'dm'
         if mode in ("dm", "both"):
-            dm = reply(history, lead_name=name, channel="ig_comment_dm")
+            dm = reply(history, lead_name=name, channel="ig_comment_dm", extra_context=pctx)
             dm = dm.replace(config.HANDOFF_MARKER, "").strip()
             if comment_id and dm:
                 instagram.private_reply(comment_id, dm)
@@ -372,7 +374,20 @@ async def ig_webhook(request: Request):
             name = frm.get("username", "")
             if not text or not comment_id:
                 continue
-            results.append(_ig_process("comment", sender_id=frm.get("id", ""), text=text, name=name, comment_id=comment_id))
+            # tenta puxar a legenda do post para dar contexto (social selling)
+            post_ctx = ""
+            media_id = (v.get("media") or {}).get("id", "")
+            if media_id:
+                try:
+                    import httpx
+                    rc = httpx.get(f"https://graph.facebook.com/{config.IG_GRAPH_VERSION}/{media_id}",
+                                   params={"fields": "caption", "access_token": config.IG_ACCESS_TOKEN},
+                                   timeout=15)
+                    post_ctx = (rc.json().get("caption") or "").strip()
+                except Exception:  # noqa: BLE001
+                    pass
+            results.append(_ig_process("comment", sender_id=frm.get("id", ""), text=text, name=name,
+                                       comment_id=comment_id, post_context=post_ctx))
 
     return {"ok": True, "processed": len(results), "results": results}
 

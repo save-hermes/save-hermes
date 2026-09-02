@@ -45,10 +45,11 @@ def poll_once() -> int:
 
     processed = 0
     media = _get(f"{config.IG_USER_ID}/media",
-                 fields="id,comments_count", limit=str(MEDIA_LOOKBACK)).get("data", [])
+                 fields="id,caption,comments_count", limit=str(MEDIA_LOOKBACK)).get("data", [])
     for m in media:
         if not m.get("comments_count"):
             continue
+        caption = (m.get("caption") or "").strip()
         comments = _get(f"{m['id']}/comments",
                         fields="id,text,username,from,timestamp", limit="50").get("data", [])
         for c in comments:
@@ -66,7 +67,7 @@ def poll_once() -> int:
             name = c.get("username") or frm.get("username", "")
             log.info("Comentário novo de @%s: %s", name, text[:60])
             _ig_process("comment", sender_id=frm.get("id", ""), text=text,
-                        name=name, comment_id=cid)
+                        name=name, comment_id=cid, post_context=caption)
             processed += 1
     return processed
 

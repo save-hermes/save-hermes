@@ -196,10 +196,12 @@ HANDOFF (passar para um humano):
 """
 
 
-def build_system_prompt(lead_name: str = "", is_admin: bool = False, channel: str = "whatsapp") -> str:
+def build_system_prompt(lead_name: str = "", is_admin: bool = False, channel: str = "whatsapp",
+                        extra_context: str = "") -> str:
     if is_admin:
         return build_admin_prompt()
     nome = f"O nome do lead é: {lead_name}." if lead_name else "Você ainda não sabe o nome do lead, pergunte com naturalidade."
+    ctx = f"\n═══════════ CONTEXTO DESTA INTERAÇÃO ═══════════\n{extra_context}\n" if extra_context else ""
 
     canal_regras = {
         "whatsapp": "",
@@ -212,15 +214,22 @@ aqui. Se a conversa evoluir para fechamento ou algo longo, é aceitável sugerir
 continuar por WhatsApp, quando facilitar para a pessoa (não obrigue).
 """,
         "ig_comment_public": """
-═══════════ CANAL: COMENTÁRIO PÚBLICO DO INSTAGRAM ═══════════
-Sua resposta é PÚBLICA — qualquer um que passar pelo post vai ler. Regras que
-SOBREPÕEM qualquer outra instrução, inclusive a base de conhecimento:
-- Responda em NO MÁXIMO 1 a 2 frases curtas, cordiais.
-- É TERMINANTEMENTE PROIBIDO escrever preço, valor, desconto, parcelamento,
-  condição de pagamento ou link em público, MESMO que a pessoa pergunte e MESMO
-  que o dado esteja na base. Em vez disso, convide para o Direct: algo como
-  "Te chamo no Direct com todos os detalhes! 😊" (varie, não soe como script).
-- Não dê a explicação completa do produto aqui — isso é papel do Direct.
+═══════════ CANAL: COMENTÁRIO PÚBLICO DO INSTAGRAM (SOCIAL SELLING) ═══════════
+Aqui é SOCIAL SELLING, não venda. Sua resposta é PÚBLICA — qualquer um que passar
+pelo post lê. O objetivo NÃO é vender no comentário; é criar conexão e puxar a
+pessoa pro Direct de forma natural. Regras que SOBREPÕEM qualquer outra instrução:
+- LEIA O CONTEXTO DO POST (a legenda/tema vem no CONTEXTO DESTA INTERAÇÃO) e
+  responda de forma coerente com o assunto do post e com o que a pessoa comentou.
+  Nada de resposta genérica que serviria pra qualquer post.
+- NÃO tente vender de cara. Nada de "conheça o curso", "temos uma oferta", etc.
+  Primeiro engaje com o comentário dela (concorde, agradeça, comente algo do tema).
+- Só DEPOIS, de forma sutil e sem obrigar, abra a porta pro Direct — como quem
+  quer conversar melhor, não como quem quer empurrar produto. Ex.: "te chamo no
+  Direct pra trocar uma ideia sobre isso 😊" (varie sempre, nunca soe como script).
+- NO MÁXIMO 1 a 2 frases curtas, cordiais, com a voz da Vanessa.
+- PROIBIDO em público: preço, valor, desconto, parcelamento, condição, link —
+  MESMO que perguntem e MESMO que esteja na base. Isso é papel do Direct.
+- Não dê a explicação completa do produto aqui.
 - Comentário hostil/spam: resposta mínima e neutra, ou nada. Nunca alimente.
 - Nunca peça ou exponha dado pessoal em público.
 """,
@@ -316,13 +325,13 @@ informação com a equipe, e siga a conversa. Se necessário, faça o handoff.
         return f"""{PERSONA}
 
 {nome}
-{canal_regras}
+{canal_regras}{ctx}
 ═══════════ REGRAS ═══════════
 {GUARDRAILS}
 
-Lembre-se: esta resposta é PÚBLICA. Seja curtíssima e convide para o Direct.
-Você NÃO tem preço, link ou dados de produto para dar aqui, e não deve inventá-los.
-Responda SEMPRE como um comentário curto e natural (1 a 2 frases)."""
+Lembre-se: esta resposta é PÚBLICA e é SOCIAL SELLING. Engaje com o comentário e
+o tema do post primeiro; só então puxe pro Direct de forma sutil, sem vender nem
+citar preço/link. Responda como um comentário curto e natural (1 a 2 frases)."""
 
     # Instrução de formato final varia por canal (WhatsApp vs. e-mail).
     if channel in ("email", "email_followup", "email_campaign"):
@@ -336,7 +345,7 @@ Responda SEMPRE como um comentário curto e natural (1 a 2 frases)."""
     return f"""{PERSONA}
 
 {nome}
-{canal_regras}{base_conhecimento}
+{canal_regras}{ctx}{base_conhecimento}
 ═══════════ OFERTA (resumo — a BASE acima prevalece em caso de divergência) ═══════════
 {OFERTA}
 

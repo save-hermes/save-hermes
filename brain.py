@@ -11,9 +11,11 @@ log = logging.getLogger("brain")
 _client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
-def reply(history: list[dict], lead_name: str, is_admin: bool = False, channel: str = "whatsapp") -> str:
+def reply(history: list[dict], lead_name: str, is_admin: bool = False, channel: str = "whatsapp",
+          extra_context: str = "") -> str:
     """Recebe o histórico [{'role','content'}...] e devolve a resposta do vendedor IA."""
-    system = build_system_prompt(lead_name=lead_name, is_admin=is_admin, channel=channel)
+    system = build_system_prompt(lead_name=lead_name, is_admin=is_admin, channel=channel,
+                                 extra_context=extra_context)
     try:
         resp = _client.messages.create(
             model=config.ANTHROPIC_MODEL,
