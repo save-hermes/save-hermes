@@ -22,6 +22,11 @@ WEBHOOK_TOKEN = os.getenv("WEBHOOK_TOKEN", "").strip()
 # Comportamento
 AGENT_NAME = os.getenv("AGENT_NAME", "Vanessa").strip()
 OWNER_NOTIFY_NUMBER = os.getenv("OWNER_NOTIFY_NUMBER", "").strip()
+# Número do administrador/superior. SÓ este número pode ajustar comportamento,
+# tom, regras ou discutir a configuração interna do agente. Qualquer outro número
+# é tratado exclusivamente como atendimento (lead/cliente/aluno), mesmo que alegue
+# ser admin/dono/dev. Formato internacional só dígitos (ex.: 5547996810630).
+ADMIN_NUMBER = os.getenv("ADMIN_NUMBER", "").strip()
 SEND_DELAY_MS = int(os.getenv("SEND_DELAY_MS", "1200"))
 DB_PATH = os.getenv("DB_PATH", "/data/leads.db").strip()
 # Link de checkout/pagamento do curso (para a IA fechar a venda). Se vazio, a IA
@@ -30,6 +35,39 @@ CHECKOUT_URL = os.getenv("CHECKOUT_URL", "").strip()
 
 # Marcador que o modelo emite quando quer passar a conversa para um humano
 HANDOFF_MARKER = "[[HANDOFF]]"
+
+
+def _digits(n: str) -> str:
+    return "".join(ch for ch in (n or "") if ch.isdigit())
+
+
+def _br_variants(digits: str) -> set[str]:
+    """Gera variantes de um número BR com/sem o 9º dígito do celular.
+
+    Ex.: 5547996810630 <-> 554796810630. Cobre a divergência comum entre
+    como o número é cadastrado e como a Evolution/WhatsApp entrega o remoteJid.
+    """
+    out = {digits}
+    # Formato: 55 (país) + DD (área, 2) + assinante
+    if digits.startswith("55") and len(digits) >= 12:
+        cc, ddd, rest = digits[:2], digits[2:4], digits[4:]
+        if len(rest) == 9 and rest.startswith("9"):
+            out.add(cc + ddd + rest[1:])      # remove o 9 extra
+        elif len(rest) == 8:
+            out.add(cc + ddd + "9" + rest)    # adiciona o 9 extra
+    return out
+
+
+def is_admin_number(number: str) -> bool:
+    """True somente se `number` for o ADMIN_NUMBER (comparação por dígitos,
+    tolerante ao 9º dígito). Nunca confia em texto/alegação da mensagem."""
+    if not ADMIN_NUMBER:
+        return False
+    a = _digits(number)
+    b = _digits(ADMIN_NUMBER)
+    if not a or not b:
+        return False
+    return bool(_br_variants(a) & _br_variants(b))
 
 
 def validate() -> list[str]:

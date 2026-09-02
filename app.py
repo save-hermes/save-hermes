@@ -102,27 +102,31 @@ async def webhook(request: Request):
         return {"ok": True, "dup": True}
 
     jid = info["jid"]
-    log.info("Lead %s (%s): %s", info["name"] or info["number"], jid, info["text"][:80])
+    is_admin = config.is_admin_number(info["number"])
+    who = "ADMIN" if is_admin else (info["name"] or info["number"])
+    log.info("%s (%s): %s", who, jid, info["text"][:80])
 
     # 3) Registra lead + mensagem do usuário
     store.get_or_create_lead(jid, info["number"], info["name"])
     store.add_message(jid, "user", info["text"])
 
-    # 4) Chama o cérebro
+    # 4) Chama o cérebro (canal de admin usa prompt de bastidor)
     history = store.get_history(jid, limit=20)
-    answer = reply(history, lead_name=info["name"])
+    answer = reply(history, lead_name=info["name"], is_admin=is_admin)
 
-    # 5) Detecta handoff
-    handoff = config.HANDOFF_MARKER in answer
-    if handoff:
+    # 5) Detecta handoff (não se aplica ao próprio admin)
+    handoff = (config.HANDOFF_MARKER in answer) and not is_admin
+    if config.HANDOFF_MARKER in answer:
         answer = answer.replace(config.HANDOFF_MARKER, "").strip()
 
-    # 6) Responde ao lead e grava
+    # 6) Responde e grava
     evolution.send_text(info["number"], answer)
     store.add_message(jid, "assistant", answer)
 
     # 7) Atualiza status e avisa o dono se for lead quente
-    if handoff:
+    if is_admin:
+        store.set_status(jid, "admin")
+    elif handoff:
         store.set_status(jid, "quente")
         evolution.notify_owner(
             f"🔥 LEAD QUENTE / assumir conversa\n"
@@ -133,4 +137,4 @@ async def webhook(request: Request):
     else:
         store.set_status(jid, "qualificado")
 
-    return {"ok": True, "handoff": handoff}
+    return {"ok": True, "handoff": handoff, "admin": is_admin}

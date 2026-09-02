@@ -48,7 +48,7 @@ appmod.store.init()  # startup não roda sem 'with TestClient(...)'; init manual
 results = []
 
 with patch.object(appmod.evolution, "send_text", side_effect=fake_send_text), \
-     patch.object(appmod, "reply", side_effect=lambda h, lead_name: brain_replies.pop(0)):
+     patch.object(appmod, "reply", side_effect=lambda h, lead_name, is_admin=False: brain_replies.pop(0)):
 
     # 1) Token errado -> 401
     r = client.post("/webhook?token=WRONG", json=make_payload("oi", "m1"))
