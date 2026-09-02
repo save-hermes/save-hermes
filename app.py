@@ -402,3 +402,65 @@ async def followup_run(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     import followup, email_worker
     return followup.run_once(deliver_wa=email_worker.deliver_wa, deliver_email=email_worker.deliver_email)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RESEND — webhook de eventos (métricas: entregue/aberto/clicado/bounce/spam)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _resend_valid_signature(raw: bytes, headers) -> bool:
+    """Valida a assinatura Svix do webhook do Resend.
+
+    Svix assina `${svix_id}.${svix_timestamp}.${body}` com HMAC-SHA256 usando o
+    secret (base64 após o prefixo 'whsec_'). O header svix-signature traz uma ou
+    mais assinaturas no formato 'v1,<base64>'. Se não houver secret configurado,
+    não bloqueia (útil em teste), mas loga aviso.
+    """
+    secret = config.RESEND_WEBHOOK_SECRET
+    if not secret:
+        log.warning("RESEND_WEBHOOK_SECRET não configurado — pulando validação de assinatura.")
+        return True
+    svix_id = headers.get("svix-id", "")
+    svix_ts = headers.get("svix-timestamp", "")
+    svix_sig = headers.get("svix-signature", "")
+    if not (svix_id and svix_ts and svix_sig):
+        return False
+    import base64
+    key = secret.split("_", 1)[1] if secret.startswith("whsec_") else secret
+    try:
+        secret_bytes = base64.b64decode(key)
+    except Exception:  # noqa: BLE001
+        secret_bytes = key.encode()
+    signed = f"{svix_id}.{svix_ts}.".encode() + raw
+    expected = base64.b64encode(hmac.new(secret_bytes, signed, hashlib.sha256).digest()).decode()
+    # svix-signature pode ter várias assinaturas separadas por espaço: "v1,xxxx v1,yyyy"
+    for part in svix_sig.split():
+        sig = part.split(",", 1)[-1]
+        if hmac.compare_digest(sig, expected):
+            return True
+    return False
+
+
+@app.post("/resend/webhook")
+async def resend_webhook(request: Request):
+    """Recebe eventos do Resend e grava métricas (open/click/bounce/etc.)."""
+    raw = await request.body()
+    if not _resend_valid_signature(raw, request.headers):
+        return JSONResponse({"error": "bad signature"}, status_code=401)
+    import json as _json
+    try:
+        body = _json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "bad json"}, status_code=400)
+
+    # Formato Resend: { "type": "email.opened", "data": { "email_id": "...", "to": [...], "subject": "..." } }
+    etype = (body.get("type") or "").replace("email.", "")  # opened|delivered|clicked|bounced|complained|sent|delivery_delayed
+    data = body.get("data") or {}
+    email_id = data.get("email_id") or data.get("id") or ""
+    to = data.get("to") or []
+    recipient = (to[0] if isinstance(to, list) and to else (to if isinstance(to, str) else "")) or ""
+    subject = data.get("subject", "")
+    if not email_id or not etype:
+        return {"ignored": "missing_fields"}
+    store.record_email_event(email_id, etype, recipient=recipient, subject=subject, raw=raw.decode("utf-8", "replace"))
+    return {"ok": True, "type": etype}

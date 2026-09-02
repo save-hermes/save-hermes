@@ -91,6 +91,9 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 # Remetente usado no Resend (precisa ser de um domínio verificado no Resend).
 # Se vazio, usa EMAIL_ADDRESS. Ex.: "Vanessa | Save Educação <vanessa@saveeducacao.com.br>".
 RESEND_FROM = os.getenv("RESEND_FROM", "").strip()
+# Signing secret do webhook do Resend (começa com "whsec_"). Valida a assinatura
+# Svix dos eventos (entregue/aberto/clicado/bounce/reclamação). resend.com/webhooks
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
 
 
 def email_send_provider() -> str:

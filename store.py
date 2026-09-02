@@ -26,6 +26,23 @@ CREATE TABLE IF NOT EXISTS processed (
     msg_id      TEXT PRIMARY KEY,     -- id da mensagem da Evolution (idempotência)
     ts          INTEGER
 );
+CREATE TABLE IF NOT EXISTS email_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id    TEXT,                 -- id do e-mail no Resend
+    type        TEXT,                 -- sent|delivered|opened|clicked|bounced|complained|delivery_delayed
+    recipient   TEXT,                 -- destinatário (lower)
+    jid         TEXT,                 -- lead vinculado (se encontrado por e-mail)
+    subject     TEXT,
+    ts          INTEGER,
+    raw         TEXT                  -- payload bruto (json) para depuração
+);
+CREATE TABLE IF NOT EXISTS email_sends (
+    email_id    TEXT PRIMARY KEY,     -- id do e-mail no Resend (1 por envio)
+    recipient   TEXT,
+    jid         TEXT,
+    subject     TEXT,
+    ts          INTEGER
+);
 """
 
 
@@ -324,3 +341,94 @@ def pause_followup(jid: str) -> None:
 
 def set_lead_status(jid: str, status: str) -> None:
     set_status(jid, status)
+
+
+# ───────────────────────── Métricas de e-mail (Resend webhook) ─────────────────────────
+
+def record_email_send(email_id: str, recipient: str, jid: str = "", subject: str = "") -> None:
+    """Registra um envio (chamado quando a Vanessa envia via Resend)."""
+    if not email_id:
+        return
+    with _conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO email_sends (email_id, recipient, jid, subject, ts) VALUES (?,?,?,?,?)",
+            (email_id, (recipient or "").lower(), jid, subject, int(time.time())),
+        )
+
+
+def record_email_event(email_id: str, etype: str, recipient: str = "", subject: str = "", raw: str = "") -> bool:
+    """Registra um evento do webhook do Resend. Idempotente por (email_id,type).
+    Vincula ao lead pelo e-mail do destinatário, se existir. Retorna False se dup.
+    """
+    recipient = (recipient or "").lower()
+    with _conn() as c:
+        # dedup: mesmo email_id+type só conta uma vez (opened pode repetir, mas
+        # para métricas de "abriu?" basta a primeira).
+        dup = c.execute(
+            "SELECT 1 FROM email_events WHERE email_id=? AND type=? LIMIT 1",
+            (email_id, etype),
+        ).fetchone()
+        if dup:
+            return False
+        # tenta vincular ao lead
+        jid = ""
+        if recipient:
+            row = c.execute(
+                "SELECT jid FROM leads WHERE email=? ORDER BY updated_at DESC LIMIT 1",
+                (recipient,),
+            ).fetchone()
+            if row:
+                jid = row["jid"]
+        c.execute(
+            "INSERT INTO email_events (email_id, type, recipient, jid, subject, ts, raw) VALUES (?,?,?,?,?,?,?)",
+            (email_id, etype, recipient, jid, subject, int(time.time()), raw[:4000]),
+        )
+    return True
+
+
+def email_metrics(since_ts: int | None = None) -> dict:
+    """Agrega métricas de desempenho de e-mail para o painel.
+
+    Taxa de abertura/clique é calculada sobre os ENVIOS (email_sends) que têm ao
+    menos um evento 'delivered' (base de entregues), como manda a boa prática.
+    """
+    where = "WHERE ts>=?" if since_ts else ""
+    args = (since_ts,) if since_ts else ()
+    with _conn() as c:
+        sends = c.execute(f"SELECT COUNT(*) FROM email_sends {where}", args).fetchone()[0]
+
+        def cnt(t):
+            w = "WHERE type=?" + (" AND ts>=?" if since_ts else "")
+            a = (t, since_ts) if since_ts else (t,)
+            return c.execute(f"SELECT COUNT(DISTINCT email_id) FROM email_events {w}", a).fetchone()[0]
+
+        delivered = cnt("delivered")
+        opened = cnt("opened")
+        clicked = cnt("clicked")
+        bounced = cnt("bounced")
+        complained = cnt("complained")
+
+    base = delivered or sends or 0
+    pct = lambda n: round(100 * n / base, 1) if base else 0.0
+    return {
+        "sends": sends,
+        "delivered": delivered,
+        "opened": opened,
+        "clicked": clicked,
+        "bounced": bounced,
+        "complained": complained,
+        "open_rate": pct(opened),
+        "click_rate": pct(clicked),
+        "bounce_rate": round(100 * bounced / sends, 1) if sends else 0.0,
+    }
+
+
+def recent_email_events(limit: int = 30) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT e.type, e.recipient, e.subject, e.ts, l.name
+                 FROM email_events e LEFT JOIN leads l ON l.jid=e.jid
+                 ORDER BY e.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]

@@ -116,6 +116,12 @@
 
 <div class="wrap">
   <div class="cards" id="kpis"></div>
+
+  <div class="panel" style="margin-bottom:20px">
+    <h2>📧 Desempenho de e-mail (Resend)</h2>
+    <div class="cards" id="email-kpis" style="margin:16px 18px"></div>
+  </div>
+
   <div class="layout">
     <div class="panel">
       <h2>Leads</h2>
@@ -214,6 +220,20 @@ async function loadFeed(){
   }).join('');
 }
 
+async function loadEmailMetrics(){
+  const {metrics:m} = await (await fetch('/api/email_metrics')).json();
+  const card = (n,l,accent)=>`<div class="kpi${accent?' accent':''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $('#email-kpis').innerHTML =
+    card(m.sends,'Enviados')+
+    card(m.delivered,'Entregues')+
+    card(m.open_rate+'%','Taxa de abertura',true)+
+    card(m.opened,'Aberturas')+
+    card(m.click_rate+'%','Taxa de clique')+
+    card(m.clicked,'Cliques')+
+    card(m.bounced,'Bounces')+
+    card(m.complained,'Spam');
+}
+
 async function openLead(jid){
   curJid = jid;
   const d = await (await fetch('/api/lead?jid='+encodeURIComponent(jid))).json();
@@ -244,7 +264,7 @@ async function pauseFollowup(){
 }
 
 async function refresh(){
-  await Promise.all([loadStats(), loadLeads(), loadFeed()]);
+  await Promise.all([loadStats(), loadLeads(), loadFeed(), loadEmailMetrics()]);
   $('#refreshed').textContent = 'atualizado '+new Date().toLocaleTimeString('pt-BR');
 }
 $('#search').addEventListener('input', ()=>{clearTimeout(window._t);window._t=setTimeout(loadLeads,300)});

@@ -29,7 +29,12 @@ def deliver_email(to_addr: str, subject: str, body: str, lead: dict | None = Non
     if config.EMAIL_DAILY_LIMIT > 0 and store.emails_sent_today() >= config.EMAIL_DAILY_LIMIT:
         log.warning("Limite diário de e-mail atingido — não enviando para %s", to_addr)
         return {"ok": False, "error": "email_daily_limit"}
-    return email_client.send(to_addr, subject, body, in_reply_to=in_reply_to, references=references)
+    r = email_client.send(to_addr, subject, body, in_reply_to=in_reply_to, references=references)
+    # Registra o envio para casar com os eventos do webhook do Resend (métricas).
+    if r.get("ok") and r.get("message_id"):
+        jid = (lead or {}).get("jid", "") if lead else ""
+        store.record_email_send(r["message_id"], to_addr, jid=jid, subject=subject)
+    return r
 
 
 def deliver_wa(number: str, text: str) -> dict:

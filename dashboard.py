@@ -54,6 +54,11 @@ def api_activity(limit: int = 40):
     return {"activity": store.recent_activity(limit=limit)}
 
 
+@app.get("/api/email_metrics")
+def api_email_metrics():
+    return {"metrics": store.email_metrics(), "events": store.recent_email_events(limit=20)}
+
+
 @app.post("/api/lead/status")
 async def api_set_status(request: Request):
     body = await request.json()
