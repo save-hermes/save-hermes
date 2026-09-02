@@ -100,6 +100,15 @@ def email_send_provider() -> str:
     """Qual provedor de envio está ativo agora: 'resend' se houver chave, senão 'smtp'."""
     return "resend" if RESEND_API_KEY else "smtp"
 
+# === WEBSAVE MCP (CRM/leads do sistema de webinars) ===
+# Endpoint do MCP interno do WEBSAVE (Streamable HTTP). Barra final é obrigatória.
+WEBSAVE_MCP_URL = os.getenv(
+    "WEBSAVE_MCP_URL",
+    "https://webnairs.saveeducacao.com.br/api/internal/mcp/vanessa/",
+).strip()
+# Token do MCP (guardado no app_settings do WEBSAVE como mcp_vanessa_token).
+WEBSAVE_MCP_TOKEN = os.getenv("WEBSAVE_MCP_TOKEN", "").strip()
+
 # === Follow-up (cadência de acompanhamento) ===
 # Ativa/desativa o motor de follow-up.
 FOLLOWUP_ENABLED = os.getenv("FOLLOWUP_ENABLED", "true").strip().lower() in ("1", "true", "yes", "sim")

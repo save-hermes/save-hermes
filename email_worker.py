@@ -53,6 +53,31 @@ def _jid_for_email(addr: str) -> str:
     return f"email:{addr.strip().lower()}"
 
 
+def _inject_websave_context(jid: str, email: str) -> None:
+    """Busca o prontuário do lead no WEBSAVE (MCP) e injeta no histórico como
+    contexto de sistema, para a Vanessa personalizar o atendimento. Faz isso no
+    máximo 1x por lead (marca via tabela processed) para não repetir/gastar.
+    """
+    try:
+        import websave_mcp
+        if not websave_mcp.configured():
+            return
+        if store.already_processed(f"websave_ctx:{jid}"):
+            return
+        perfil = websave_mcp.buscar_lead(email)
+        historico = websave_mcp.historico_lead(email, limit=10)
+        if perfil and "[erro" not in perfil:
+            ctx = (
+                "[CONTEXTO DO CRM WEBSAVE — dados internos deste lead, use para "
+                "personalizar o atendimento; NÃO cite que veio de um sistema]\n"
+                f"{perfil}\n\n{historico}"
+            )
+            store.add_message(jid, "user", ctx)
+            log.info("Contexto WEBSAVE injetado para %s", email)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Falha ao buscar contexto WEBSAVE p/ %s: %s", email, e)
+
+
 def process_inbound_email(mail: dict) -> dict:
     """Processa UM e-mail recebido: gera a resposta da Vanessa e responde na thread."""
     addr = mail.get("from_addr", "")
@@ -81,6 +106,9 @@ def process_inbound_email(mail: dict) -> dict:
     # respondeu -> sai do fluxo de nutrição de mkt (vira atendimento 1:1)
     import flows
     flows.on_lead_replied(jid)
+
+    # Consulta o WEBSAVE (CRM) para enriquecer o atendimento com o prontuário do lead.
+    _inject_websave_context(jid, addr)
 
     # Limite diário de e-mail.
     if config.EMAIL_DAILY_LIMIT > 0 and store.emails_sent_today() >= config.EMAIL_DAILY_LIMIT:

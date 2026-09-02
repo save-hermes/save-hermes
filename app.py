@@ -17,6 +17,7 @@ import config
 import evolution
 import instagram
 import email_client
+import websave_mcp
 import store
 from brain import reply
 
@@ -73,6 +74,7 @@ def health():
             "hours": config.FOLLOWUP_HOURS,
             "due_now": len(store.due_followups()),
         },
+        "websave_mcp": websave_mcp.status(),
     }
 
 
