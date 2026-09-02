@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import config
 import evolution
 import instagram
+import email_client
 import store
 from brain import reply
 
@@ -55,6 +56,17 @@ def health():
         "whatsapp": state,
         "knowledge_base": knowledge.status(),
         "instagram": instagram.status(),
+        "email": {
+            "configured": email_client.configured(),
+            "address": config.EMAIL_ADDRESS or None,
+            "sent_today": store.emails_sent_today(),
+            "daily_limit": config.EMAIL_DAILY_LIMIT,
+        },
+        "followup": {
+            "enabled": config.FOLLOWUP_ENABLED,
+            "hours": config.FOLLOWUP_HOURS,
+            "due_now": len(store.due_followups()),
+        },
     }
 
 
@@ -116,6 +128,8 @@ def _process(info: dict, deliver: bool) -> dict:
     # Registra lead + mensagem do usuário
     store.get_or_create_lead(jid, info["number"], info["name"])
     store.add_message(jid, "user", info["text"])
+    if not is_admin:
+        store.record_inbound(jid)  # lead respondeu -> zera régua de follow-up
 
     # Limite diário de envio (warming) — admin nunca é limitado.
     if not is_admin and config.DAILY_SEND_LIMIT > 0:
@@ -154,6 +168,12 @@ def _process(info: dict, deliver: bool) -> dict:
         )
     else:
         store.set_status(jid, "qualificado")
+        # Reabre a régua de follow-up: se o lead sumir, a Vanessa retoma (dia 1/3/7).
+        try:
+            import followup
+            followup.arm(jid, from_stage=0)
+        except Exception as e:  # noqa: BLE001
+            log.error("Falha ao agendar follow-up p/ %s: %s", jid, e)
 
     return {"ok": True, "reply": answer, "handoff": handoff, "admin": is_admin}
 
@@ -342,3 +362,42 @@ async def ig_webhook(request: Request):
             results.append(_ig_process("comment", sender_id=frm.get("id", ""), text=text, name=name, comment_id=comment_id))
 
     return {"ok": True, "processed": len(results), "results": results}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# E-MAIL — prospecção (1º toque) e disparo manual do poll de caixa de entrada
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/email/outreach")
+async def email_outreach(request: Request):
+    """Inicia uma conversa por e-mail (prospecção) com um lead.
+
+    Payload JSON: { "to": "lead@x.com", "name": "Fulano", "seed": "veio do anúncio Y" }
+    Protegido pelo WEBHOOK_TOKEN (?token=...). Agenda o follow-up automaticamente.
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    to = (body.get("to") or "").strip()
+    if not to or "@" not in to:
+        return JSONResponse({"error": "invalid_recipient"}, status_code=400)
+    import email_worker
+    return email_worker.start_email_outreach(to, name=(body.get("name") or "").strip(), seed=(body.get("seed") or "").strip())
+
+
+@app.post("/email/poll")
+async def email_poll(request: Request):
+    """Dispara UMA leitura da caixa de entrada (útil para teste/cron externo)."""
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import email_worker
+    return email_worker.poll_inbox_once()
+
+
+@app.post("/followup/run")
+async def followup_run(request: Request):
+    """Roda os follow-ups vencidos agora (útil para teste/cron externo)."""
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import followup, email_worker
+    return followup.run_once(deliver_wa=email_worker.deliver_wa, deliver_email=email_worker.deliver_email)

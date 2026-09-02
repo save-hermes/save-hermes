@@ -62,6 +62,37 @@ IG_GRAPH_VERSION = os.getenv("IG_GRAPH_VERSION", "v23.0").strip()
 #        "both" (responde curtinho no comentário E manda DM com o detalhe).
 IG_COMMENT_MODE = os.getenv("IG_COMMENT_MODE", "both").strip()
 
+# === E-mail (Google Workspace via SMTP/IMAP) ===
+# Endereço que a Vanessa usa para enviar/receber (ex.: vanessa@saveeducacao.com.br).
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "").strip()
+# Nome exibido no "De:" (From). Ex.: "Vanessa | Save Educação".
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", f"{AGENT_NAME} | Save Educação").strip()
+# Senha de App do Google (16 caracteres, gerada em myaccount.google.com/apppasswords).
+# NÃO é a senha normal da conta. Exige verificação em 2 etapas ativada.
+EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD", "").strip()
+# Servidores (padrões do Google Workspace / Gmail).
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com").strip()
+IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+# Assinatura anexada ao final dos e-mails da Vanessa (texto puro).
+EMAIL_SIGNATURE = os.getenv(
+    "EMAIL_SIGNATURE",
+    f"{AGENT_NAME}\nSave Educação",
+).strip()
+# Limite diário de e-mails enviados (deliverability/anti-spam). 0 = sem limite.
+EMAIL_DAILY_LIMIT = int(os.getenv("EMAIL_DAILY_LIMIT", "50"))
+
+# === Follow-up (cadência de acompanhamento) ===
+# Ativa/desativa o motor de follow-up.
+FOLLOWUP_ENABLED = os.getenv("FOLLOWUP_ENABLED", "true").strip().lower() in ("1", "true", "yes", "sim")
+# Cadência clássica: horas após o ÚLTIMO contato sem resposta para cada toque.
+# Estágio 0 -> 1 (24h), 1 -> 2 (72h = dia 3), 2 -> 3 (168h = dia 7). Depois para.
+FOLLOWUP_HOURS = os.getenv("FOLLOWUP_HOURS", "24,72,168").strip()
+# Só dispara follow-up dentro do horário comercial (evita mandar de madrugada).
+FOLLOWUP_HOUR_START = int(os.getenv("FOLLOWUP_HOUR_START", "9"))   # 09h
+FOLLOWUP_HOUR_END = int(os.getenv("FOLLOWUP_HOUR_END", "20"))      # 20h
+
 
 def _digits(n: str) -> str:
     return "".join(ch for ch in (n or "") if ch.isdigit())

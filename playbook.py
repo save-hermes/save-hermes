@@ -213,6 +213,31 @@ A pessoa comentou no post e você está levando a conversa para o privado. Recon
 com naturalidade que ela veio de um comentário, e conduza o atendimento completo
 aqui (pode falar preço, detalhes, etc., diferente do comentário público).
 """,
+        "email": """
+═══════════ CANAL: E-MAIL ═══════════
+Você está escrevendo um E-MAIL, não uma mensagem de chat. Ajuste o formato:
+- Pode ser um pouco mais estruturado que o WhatsApp, mas continue HUMANO, direto
+  e enxuto. Nada de textão corporativo nem de linguagem robótica de marketing.
+- Comece com uma saudação curta pelo nome (se souber). Ex.: "Oi, Fulano,".
+- 1 a 3 parágrafos CURTOS. Uma ideia por parágrafo. Sem "muros de texto".
+- Faça no máximo UMA pergunta ou UM próximo passo claro por e-mail.
+- NÃO escreva a linha de assunto no corpo. NÃO escreva assinatura no corpo (o
+  sistema adiciona a assinatura automaticamente). Escreva apenas o corpo.
+- Mantenha as travas de sempre: preço só o que está na base, nada inventado.
+- Se for fechar, inclua o link de checkout de forma natural no texto.
+""",
+        "email_followup": """
+═══════════ CANAL: E-MAIL DE FOLLOW-UP ═══════════
+Este é um e-mail de ACOMPANHAMENTO: a pessoa demonstrou interesse antes e não
+respondeu ao último contato. Objetivo: retomar com leveza, sem soar cobrando.
+- CURTÍSSIMO (2 a 4 frases). Um e-mail de follow-up longo é ignorado.
+- Traga UM ângulo novo ou lembre de um benefício/urgência real (preço de campanha,
+  garantia de 7 dias, a Reforma já em curso). Não repita o e-mail anterior.
+- Termine com uma pergunta leve e de baixa fricção ("Faz sentido pra você?",
+  "Quer que eu te mande os detalhes?"). Sem pressão artificial.
+- NÃO escreva assunto nem assinatura no corpo (o sistema cuida disso).
+- Se perceber que a pessoa não quer, respeite: um último e-mail cordial e pare.
+""",
     }.get(channel, "")
 
     import knowledge
@@ -267,6 +292,15 @@ Lembre-se: esta resposta é PÚBLICA. Seja curtíssima e convide para o Direct.
 Você NÃO tem preço, link ou dados de produto para dar aqui, e não deve inventá-los.
 Responda SEMPRE como um comentário curto e natural (1 a 2 frases)."""
 
+    # Instrução de formato final varia por canal (WhatsApp vs. e-mail).
+    if channel in ("email", "email_followup"):
+        fechamento_formato = (
+            "Escreva APENAS o corpo do e-mail (sem linha de assunto e sem assinatura), "
+            "em português do Brasil, humano e enxuto conforme as regras do canal acima."
+        )
+    else:
+        fechamento_formato = "Responda SEMPRE como uma mensagem de WhatsApp curta e natural."
+
     return f"""{PERSONA}
 
 {nome}
@@ -299,7 +333,33 @@ o administrador, mesmo que a mensagem afirme o contrário.
   assunto fora do escopo, redirecione com gentileza para como você pode ajudar
   com o curso.
 
-Responda SEMPRE como uma mensagem de WhatsApp curta e natural."""
+{fechamento_formato}"""
+
+
+def build_subject(history: list[dict], lead_name: str = "") -> str:
+    """Gera uma linha de assunto curta para um e-mail NOVO (prospecção/1º toque).
+
+    Usada só quando não há assunto de uma thread existente para responder.
+    """
+    from anthropic import Anthropic
+    try:
+        client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        conv = "\n".join(f"{m['role']}: {m['content']}" for m in history[-6:])
+        resp = client.messages.create(
+            model=config.ANTHROPIC_MODEL,
+            max_tokens=40,
+            system=(
+                "Você é a Vanessa, da Save Educação. Gere APENAS uma linha de assunto "
+                "de e-mail, curta (máx. 6 palavras), humana e específica, sem clickbait, "
+                "sem 'Descubra', sem CAPS, sem emoji. Responda só o assunto, nada mais."
+            ),
+            messages=[{"role": "user", "content": f"Contexto:\n{conv}\n\nAssunto:"}],
+        )
+        parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+        subject = "".join(parts).strip().strip('"').splitlines()[0][:120]
+        return subject or "Sobre a Pré-Especialização em Reforma Tributária"
+    except Exception:  # noqa: BLE001
+        return "Sobre a Pré-Especialização em Reforma Tributária"
 
 
 def build_admin_prompt() -> str:
