@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vanessa · CRM</title>
+<style>
+  /* ===== Stripe design tokens (light) ===== */
+  :root{
+    --primary:#533afd; --primary-foreground:#ffffff;
+    --background:#ffffff; --foreground:#061b31;
+    --surface:#ffffff; --card:#ffffff;
+    --muted:#f8fafd; --muted-foreground:#64748d;
+    --border:#e5edf5; --input:#f8fafd; --ring:#533afd;
+    --accent:#7232f1; --success:#00b261; --warning:#ff6118; --destructive:#d8351e;
+    --ink:#061b31; --ink-soft:#3c4f69; --ink-muted:#64748d;
+    --neutral-25:#f8fafd; --neutral-50:#e5edf5; --neutral-100:#d4dee9;
+    --radius-card:6px; --radius-btn:4px; --radius-input:6px; --radius-pill:9999px;
+    --font-sans:'sohne-var','SF Pro Display','Helvetica Neue',Arial,sans-serif;
+    --font-mono:'SourceCodePro','SFMono-Regular',ui-monospace,monospace;
+    --shadow-card:0px 16px 32px rgba(50,50,93,.12);
+    --shadow-card-hover:0 6px 12px -2px rgba(50,50,93,.08),0 3px 7px -3px rgba(0,0,0,.04);
+    --shadow-btn:0 1.694px 3.388px 0 rgba(50,50,93,.2),0 1.016px 1.355px 0 rgba(125,138,161,.09);
+    --shadow-modal:0 30px 60px -50px rgba(0,0,0,.1),0 30px 60px -10px rgba(50,50,93,.25);
+    --shadow-xs:0 2px 10px rgba(0,55,112,.06),0 1px 4px rgba(0,59,137,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--background);color:var(--foreground);
+    font-family:var(--font-sans);font-size:16px;font-weight:300;line-height:1.4;
+    -webkit-font-smoothing:antialiased}
+  header{padding:18px 28px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;
+    position:sticky;top:0;background:rgba(255,255,255,.85);backdrop-filter:saturate(180%) blur(8px);z-index:5}
+  header h1{font-size:19px;margin:0;font-weight:400;letter-spacing:-.01em}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px rgba(0,178,97,.15)}
+  .mut{color:var(--muted-foreground);font-size:13px}
+  .wrap{padding:26px 28px;max-width:1320px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:26px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px 18px;
+    box-shadow:var(--shadow-xs)}
+  .kpi .n{font-size:30px;font-weight:300;letter-spacing:-.02em;color:var(--ink)}
+  .kpi .l{color:var(--muted-foreground);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:3px}
+  .kpi.small .n{font-size:22px}
+  .kpi.accent{background:var(--primary);border-color:var(--primary)}
+  .kpi.accent .n{color:#fff} .kpi.accent .l{color:rgba(255,255,255,.75)}
+  .layout{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;
+    box-shadow:var(--shadow-xs)}
+  .panel h2{font-size:12px;margin:0;padding:15px 18px;border-bottom:1px solid var(--border);
+    text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);font-weight:400}
+  .filters{display:flex;gap:8px;padding:14px 18px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+  .filters input,.filters select{background:var(--input);border:1px solid var(--border);color:var(--foreground);
+    border-radius:var(--radius-input);padding:9px 12px;font-size:14px;font-family:var(--font-sans);font-weight:300}
+  .filters input{flex:1;min-width:120px}
+  .filters input:focus,.filters select:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px rgba(83,58,253,.15)}
+  .leadrow{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--border);
+    cursor:pointer;transition:background .12s}
+  .leadrow:hover{background:var(--muted)}
+  .leadrow:last-child{border-bottom:none}
+  .av{width:36px;height:36px;border-radius:var(--radius-pill);background:var(--neutral-25);
+    display:flex;align-items:center;justify-content:center;font-weight:500;font-size:13px;color:var(--primary);
+    flex-shrink:0;border:1px solid var(--border)}
+  .leadrow .nm{font-weight:400;color:var(--ink)}
+  .leadrow .sub{color:var(--muted-foreground);font-size:13px}
+  .chip{font-size:11px;padding:3px 9px;border-radius:var(--radius-pill);font-weight:500;white-space:nowrap;
+    border:1px solid transparent}
+  .st-novo{background:#eef1ff;color:#4032c8;border-color:#d6d9fc}
+  .st-abordado{background:#f3edff;color:#6a1fd0;border-color:#e4d6fc}
+  .st-respondeu,.st-qualificado{background:#e6faf1;color:#00844a;border-color:#b8ecd2}
+  .st-quente,.st-handoff{background:#fff0e8;color:#c2410c;border-color:#ffd6bf}
+  .st-ganho{background:#e6faf1;color:#00b261;border-color:#a7ebc9}
+  .st-perdido{background:#fdecea;color:#b91c1c;border-color:#f6cfca}
+  .st-admin{background:var(--muted);color:var(--muted-foreground);border-color:var(--border)}
+  .ch{font-size:12px;color:var(--muted-foreground)}
+  .feed .it{padding:12px 18px;border-bottom:1px solid var(--border);font-size:14px;color:var(--ink-soft)}
+  .feed .it:last-child{border:none}
+  .feed .who{font-weight:500}
+  .feed .va{color:var(--primary)}
+  .feed .le{color:var(--success)}
+  .empty{padding:34px 18px;text-align:center;color:var(--muted-foreground)}
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(6,27,49,.35);display:none;align-items:center;justify-content:center;
+    z-index:20;padding:20px;backdrop-filter:blur(2px)}
+  .modal.on{display:flex}
+  .sheet{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);width:660px;
+    max-width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:var(--shadow-modal)}
+  .sheet .top{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+  .sheet .top .x{margin-left:auto;cursor:pointer;color:var(--muted-foreground);font-size:22px;background:none;border:none;line-height:1}
+  .conv{padding:18px 20px;overflow:auto;flex:1;background:var(--muted)}
+  .msg{margin-bottom:14px;display:flex}
+  .msg .b{max-width:78%;padding:10px 14px;border-radius:12px;white-space:pre-wrap;font-size:14px;line-height:1.45}
+  .msg.user .b{background:#fff;border:1px solid var(--border);color:var(--ink)}
+  .msg.assistant{justify-content:flex-end}
+  .msg.assistant .b{background:var(--primary);color:#fff}
+  .msg .t{font-size:11px;color:var(--muted-foreground);margin-top:4px}
+  .actions{padding:15px 20px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#fff}
+  .actions select{background:var(--input);border:1px solid var(--border);color:var(--foreground);
+    border-radius:var(--radius-input);padding:9px 12px;font-size:14px;font-family:var(--font-sans);font-weight:300}
+  .actions button{border-radius:var(--radius-btn);padding:9px 16px;font-size:13px;cursor:pointer;font-weight:400;
+    font-family:var(--font-sans);transition:filter .12s,box-shadow .12s}
+  .actions button.primary{background:var(--primary);border:1px solid var(--primary);color:#fff;box-shadow:var(--shadow-btn)}
+  .actions button.primary:hover{filter:brightness(1.06)}
+  .actions button.secondary{background:transparent;border:1px solid var(--border);color:var(--primary)}
+  .actions button.secondary:hover{background:var(--muted)}
+  .actions button:active{transform:scale(.98)}
+  .meta{font-size:13px;color:var(--muted-foreground);margin-right:auto}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <h1>Vanessa · CRM</h1>
+  <span class="mut" id="clock"></span>
+  <span class="mut" style="margin-left:auto" id="refreshed"></span>
+</header>
+
+<div class="wrap">
+  <div class="cards" id="kpis"></div>
+  <div class="layout">
+    <div class="panel">
+      <h2>Leads</h2>
+      <div class="filters">
+        <input id="search" placeholder="Buscar nome, número ou e-mail…">
+        <select id="fstatus">
+          <option value="">Todos status</option>
+          <option>novo</option><option>abordado</option><option>respondeu</option>
+          <option>qualificado</option><option>quente</option><option>handoff</option>
+          <option>ganho</option><option>perdido</option>
+        </select>
+        <select id="fchannel">
+          <option value="">Todos canais</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="email">E-mail</option>
+          <option value="instagram">Instagram</option>
+        </select>
+      </div>
+      <div id="leads"></div>
+    </div>
+    <div class="panel">
+      <h2>Atividade recente da Vanessa</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <div class="top">
+      <div class="av" id="m-av"></div>
+      <div>
+        <div id="m-name" style="font-weight:400;color:var(--ink)"></div>
+        <div class="mut" id="m-sub"></div>
+      </div>
+      <button class="x" onclick="closeModal()">×</button>
+    </div>
+    <div class="conv" id="m-conv"></div>
+    <div class="actions">
+      <span class="meta" id="m-meta"></span>
+      <select id="m-status">
+        <option>novo</option><option>abordado</option><option>respondeu</option>
+        <option>qualificado</option><option>quente</option><option>handoff</option>
+        <option>ganho</option><option>perdido</option>
+      </select>
+      <button class="primary" onclick="saveStatus()">Salvar status</button>
+      <button class="secondary" onclick="pauseFollowup()">Pausar follow-up</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const CH = {whatsapp:'🟢 WhatsApp', email:'✉️ E-mail', instagram:'📷 Instagram'};
+const fmt = ts => ts ? new Date(ts*1000).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+const initials = n => (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase() || '?';
+let curJid = null;
+
+async function loadStats(){
+  const s = await (await fetch('/api/stats')).json();
+  const st = s.by_status||{};
+  const order = ['novo','abordado','respondeu','qualificado','quente','handoff','ganho','perdido'];
+  const funnel = order.filter(k=>st[k]).map(k=>`<div class="kpi small"><div class="n">${st[k]}</div><div class="l">${k}</div></div>`).join('');
+  $('#kpis').innerHTML =
+    `<div class="kpi accent"><div class="n">${s.total}</div><div class="l">Leads totais</div></div>`+
+    `<div class="kpi"><div class="n">${s.msgs_sent_today}</div><div class="l">Msgs hoje</div></div>`+
+    `<div class="kpi"><div class="n">${s.followups_pending}</div><div class="l">Follow-ups agendados</div></div>`+
+    funnel;
+}
+
+async function loadLeads(){
+  const q = new URLSearchParams({search:$('#search').value, status:$('#fstatus').value, channel:$('#fchannel').value});
+  const {leads} = await (await fetch('/api/leads?'+q)).json();
+  if(!leads.length){ $('#leads').innerHTML = '<div class="empty">Nenhum lead ainda. Quando alguém falar com a Vanessa, aparece aqui.</div>'; return; }
+  $('#leads').innerHTML = leads.map(l=>{
+    const ch = l.channel_derived||'whatsapp';
+    const sub = l.email || l.number || '';
+    const fu = l.next_followup_at ? ' · ⏰ '+fmt(l.next_followup_at) : '';
+    return `<div class="leadrow" onclick="openLead('${l.jid.replace(/'/g,"\\'")}')">
+      <div class="av">${initials(l.name)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${l.name||'(sem nome)'} <span class="ch">${CH[ch]||ch}</span></div>
+        <div class="sub">${sub}${fu}</div>
+      </div>
+      <span class="chip st-${l.status||'novo'}">${l.status||'novo'}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadFeed(){
+  const {activity} = await (await fetch('/api/activity?limit=40')).json();
+  if(!activity.length){ $('#feed').innerHTML='<div class="empty">Sem atividade ainda.</div>'; return; }
+  $('#feed').innerHTML = activity.map(a=>{
+    const who = a.role==='assistant' ? `<span class="who va">Vanessa</span>` : `<span class="who le">${a.name||'Lead'}</span>`;
+    return `<div class="it">${who} <span class="mut">${CH[a.channel_derived]||''} · ${fmt(a.ts)}</span><br>${(a.content||'').slice(0,140)}</div>`;
+  }).join('');
+}
+
+async function openLead(jid){
+  curJid = jid;
+  const d = await (await fetch('/api/lead?jid='+encodeURIComponent(jid))).json();
+  $('#m-av').textContent = initials(d.name);
+  $('#m-name').textContent = d.name || '(sem nome)';
+  const ch = d.channel_derived||'whatsapp';
+  $('#m-sub').textContent = (CH[ch]||ch)+' · '+(d.email||d.number||'');
+  $('#m-status').value = d.status||'novo';
+  const fu = d.next_followup_at ? 'Próx. follow-up: '+fmt(d.next_followup_at)+' (etapa '+(d.followup_stage||0)+')' : 'Sem follow-up agendado';
+  $('#m-meta').textContent = (d.opted_out? '🚫 opt-out · ':'')+fu;
+  $('#m-conv').innerHTML = (d.messages||[]).map(m=>
+    `<div class="msg ${m.role}"><div><div class="b">${(m.content||'').replace(/</g,'&lt;')}</div><div class="t">${fmt(m.ts)}</div></div></div>`
+  ).join('') || '<div class="empty">Sem mensagens.</div>';
+  $('#modal').classList.add('on');
+  const c=$('#m-conv'); c.scrollTop=c.scrollHeight;
+}
+function closeModal(){ $('#modal').classList.remove('on'); curJid=null; }
+
+async function saveStatus(){
+  if(!curJid) return;
+  await fetch('/api/lead/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jid:curJid,status:$('#m-status').value})});
+  closeModal(); refresh();
+}
+async function pauseFollowup(){
+  if(!curJid) return;
+  await fetch('/api/lead/pause_followup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jid:curJid})});
+  closeModal(); refresh();
+}
+
+async function refresh(){
+  await Promise.all([loadStats(), loadLeads(), loadFeed()]);
+  $('#refreshed').textContent = 'atualizado '+new Date().toLocaleTimeString('pt-BR');
+}
+$('#search').addEventListener('input', ()=>{clearTimeout(window._t);window._t=setTimeout(loadLeads,300)});
+$('#fstatus').addEventListener('change', loadLeads);
+$('#fchannel').addEventListener('change', loadLeads);
+$('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
+setInterval(()=>{ $('#clock').textContent=new Date().toLocaleTimeString('pt-BR'); }, 1000);
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

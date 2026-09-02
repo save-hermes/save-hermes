@@ -230,3 +230,97 @@ def emails_sent_today() -> int:
             (_today_start(),),
         ).fetchone()
     return int(row[0]) if row else 0
+
+
+# ───────────────────────── Consultas p/ o painel (CRM) ─────────────────────────
+
+def _channel_of_jid(jid: str) -> str:
+    if jid.startswith("email:"):
+        return "email"
+    if jid.startswith("ig_dm:") or jid.startswith("ig_comment:"):
+        return "instagram"
+    return "whatsapp"
+
+
+def funnel_stats() -> dict:
+    """Contagem de leads por status + totais úteis para os cards do painel."""
+    with _conn() as c:
+        rows = c.execute("SELECT status, COUNT(*) n FROM leads GROUP BY status").fetchall()
+        total = c.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        due = c.execute(
+            "SELECT COUNT(*) FROM leads WHERE next_followup_at IS NOT NULL AND COALESCE(opted_out,0)=0"
+        ).fetchone()[0]
+        msgs_today = c.execute(
+            "SELECT COUNT(*) FROM messages WHERE role='assistant' AND ts>=?",
+            (_today_start(),),
+        ).fetchone()[0]
+    by_status = {r["status"] or "—": r["n"] for r in rows}
+    return {
+        "total": total,
+        "by_status": by_status,
+        "followups_pending": due,
+        "msgs_sent_today": msgs_today,
+    }
+
+
+def list_leads(status: str = "", channel: str = "", search: str = "", limit: int = 200) -> list[dict]:
+    """Lista leads com filtros opcionais (status, canal, busca por nome/número/e-mail)."""
+    q = "SELECT * FROM leads WHERE 1=1"
+    params: list = []
+    if status:
+        q += " AND status=?"; params.append(status)
+    if search:
+        q += " AND (name LIKE ? OR number LIKE ? OR email LIKE ?)"
+        like = f"%{search}%"; params += [like, like, like]
+    q += " ORDER BY updated_at DESC LIMIT ?"; params.append(limit)
+    with _conn() as c:
+        rows = [dict(r) for r in c.execute(q, params).fetchall()]
+    out = []
+    for r in rows:
+        ch = r.get("channel") or _channel_of_jid(r["jid"])
+        if channel and ch != channel:
+            continue
+        r["channel_derived"] = ch
+        out.append(r)
+    return out
+
+
+def lead_detail(jid: str) -> dict | None:
+    """Um lead + histórico completo da conversa (ordem cronológica)."""
+    with _conn() as c:
+        row = c.execute("SELECT * FROM leads WHERE jid=?", (jid,)).fetchone()
+        if not row:
+            return None
+        msgs = c.execute(
+            "SELECT role, content, ts FROM messages WHERE jid=? ORDER BY id ASC",
+            (jid,),
+        ).fetchall()
+    d = dict(row)
+    d["channel_derived"] = d.get("channel") or _channel_of_jid(jid)
+    d["messages"] = [dict(m) for m in msgs]
+    return d
+
+
+def recent_activity(limit: int = 40) -> list[dict]:
+    """Últimas mensagens (de todos os leads) para o feed 'o que a Vanessa fez'."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT m.jid, m.role, m.content, m.ts, l.name
+                 FROM messages m LEFT JOIN leads l ON l.jid=m.jid
+                 ORDER BY m.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["channel_derived"] = _channel_of_jid(d["jid"])
+        out.append(d)
+    return out
+
+
+def pause_followup(jid: str) -> None:
+    clear_followup(jid)
+
+
+def set_lead_status(jid: str, status: str) -> None:
+    set_status(jid, status)
