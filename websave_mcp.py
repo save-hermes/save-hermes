@@ -2,12 +2,14 @@
 
 A Vanessa consulta o CRM/leads do sistema de webinars (webnairs.saveeducacao.com.br)
 por aqui: perfil consolidado de um lead, prontuário (histórico de eventos),
-listagem de leads/webinários/quizzes/landing pages.
+listagem de leads/webinários/quizzes/landing pages. Também é a fonte das LPs de
+produto que rodam tráfego (para abordar/ofertar) e dos dados que personalizam a
+comunicação (e-mail/WhatsApp/e-mail mkt).
 
-QUIRK IMPORTANTE: o endpoint é uma API interna do dashboard (Next.js). Ele
-rejeita requisições "não-navegador" com {"error":"Only HTML requests are
-supported here"}. É PRECISO enviar headers de navegador (Origin/Referer/
-Sec-Fetch-*), senão retorna 500. O token vai no Authorization: Bearer.
+SPEC (oficial): POST JSON-RPC, protocolVersion 2025-06-18, SEM stream SSE.
+Headers mínimos: Content-Type: application/json + Authorization: Bearer <token>.
+NÃO envie 'text/event-stream' no Accept — isso aciona o caminho SSE e o servidor
+responde 500 {"error":"Only HTML requests are supported here"}.
 """
 import json
 import logging
@@ -20,20 +22,13 @@ log = logging.getLogger("websave_mcp")
 
 _URL = config.WEBSAVE_MCP_URL
 _TOKEN = config.WEBSAVE_MCP_TOKEN
-_BASE = "https://webnairs.saveeducacao.com.br"
+_PROTO = "2025-06-18"
 
-# Headers que fazem o guard do Next.js aceitar (descoberto empiricamente).
+# Headers mínimos da spec oficial (sem event-stream, sem hack de navegador).
 _HEADERS = {
-    "Authorization": f"Bearer {_TOKEN}",
     "Content-Type": "application/json",
-    "Accept": "application/json, text/event-stream",
-    "Origin": _BASE,
-    "Referer": _BASE + "/dashboard",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-Dest": "empty",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+    "Authorization": f"Bearer {_TOKEN}",
+    "Accept": "application/json",
 }
 
 _id = 0
