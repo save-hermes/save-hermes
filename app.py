@@ -43,12 +43,14 @@ def _startup() -> None:
 @app.get("/")
 def health():
     """Health check — o Easypanel usa para saber se o app subiu."""
+    import knowledge
     state = evolution.connection_state()
     return {
         "service": "whatsapp-sales-agent",
         "instance": config.EVOLUTION_INSTANCE,
         "config_missing": config.validate(),
         "whatsapp": state,
+        "knowledge_base": knowledge.status(),
     }
 
 

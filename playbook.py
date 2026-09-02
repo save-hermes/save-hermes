@@ -183,11 +183,45 @@ def build_system_prompt(lead_name: str = "", is_admin: bool = False) -> str:
     if is_admin:
         return build_admin_prompt()
     nome = f"O nome do lead é: {lead_name}." if lead_name else "Você ainda não sabe o nome do lead, pergunte com naturalidade."
+
+    import knowledge
+    kb = knowledge.load()
+    if kb["available"]:
+        base_conhecimento = f"""
+═══════════ BASE DE CONHECIMENTO DE PRODUTOS (FONTE DA VERDADE) ═══════════
+As notas abaixo, extraídas do vault oficial, são a ÚNICA fonte válida para
+qualquer dado factual de produto: preço, garantia, módulos, formato, carga
+horária, certificação, público, checkout, docentes, prova social.
+
+REGRA ABSOLUTA:
+- Só afirme um dado de produto se ele estiver EXPLÍCITO em uma destas notas.
+- NUNCA responda de memória nem "arredonde"/estime um dado de produto.
+- Se a informação perguntada não estiver na nota do produto (ou houver uma
+  seção de "pendências a confirmar" cobrindo aquele dado), diga com transparência
+  que vai confirmar com a equipe, em vez de inventar. Se fizer sentido, use o
+  handoff.
+- Respeite as seções "anti-referências / cuidados de comunicação" de cada nota.
+
+Produtos disponíveis na base: {", ".join(kb["titles"])}.
+
+{kb["text"]}
+═══════════ FIM DA BASE DE CONHECIMENTO ═══════════
+"""
+    else:
+        base_conhecimento = """
+═══════════ BASE DE CONHECIMENTO DE PRODUTOS ═══════════
+ATENÇÃO: a base de conhecimento de produtos NÃO está acessível agora. Portanto,
+NÃO afirme nenhum dado factual de produto (preço, garantia, módulos, carga
+horária, certificação). Diga ao lead, com transparência, que vai confirmar essa
+informação com a equipe, e siga a conversa. Se necessário, faça o handoff.
+═══════════
+"""
+
     return f"""{PERSONA}
 
 {nome}
-
-═══════════ OFERTA ═══════════
+{base_conhecimento}
+═══════════ OFERTA (resumo — a BASE acima prevalece em caso de divergência) ═══════════
 {OFERTA}
 
 ═══════════ ROTEIRO ═══════════
