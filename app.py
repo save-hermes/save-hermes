@@ -359,6 +359,84 @@ def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id
     return {"ok": True, "channel": "ig_dm", "handoff": handoff, "reply": answer}
 
 
+@app.post("/ig/reply")
+async def ig_reply_endpoint(request: Request):
+    """Canal Extensão Chrome (Instagram Web): recebe um comentário ou DM lido na
+    página e DEVOLVE o texto da resposta para a extensão digitar/enviar no navegador.
+
+    NÃO usa a Graph API (contorna o App Review): a extensão age como humano logado.
+    Payload JSON:
+      { "kind": "comment"|"dm", "id": "<id estável>", "username": "@joao",
+        "text": "mensagem", "post_context": "legenda do post (opcional)" }
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    body = await request.json()
+    kind = (body.get("kind") or "dm").strip()
+    text = (body.get("text") or "").strip()
+    username = (body.get("username") or "").strip().lstrip("@")
+    ext_id = (body.get("id") or "").strip()
+    post_context = (body.get("post_context") or "").strip()
+    if not text or not username:
+        return {"ignored": "no-actionable-message"}
+    if kind not in ("comment", "dm"):
+        kind = "dm"
+
+    # Idempotência: não responde a mesma coisa duas vezes.
+    dedup = f"igext:{kind}:{username}:{ext_id or (hash(text) & 0xffffffff)}"
+    if store.already_processed(dedup):
+        return {"ok": True, "dup": True}
+
+    jid = f"ig_{kind}:{username}"
+    store.get_or_create_lead(jid, username, username)
+    store.add_message(jid, "user", text)
+    history = store.get_history(jid, limit=20)
+
+    if kind == "comment":
+        pctx = f"Contexto do post onde a pessoa comentou (legenda/tema): {post_context}" if post_context else ""
+        answer = reply(history, lead_name=username, channel="ig_comment_public", extra_context=pctx)
+        answer = answer.replace(config.HANDOFF_MARKER, "").strip()
+        store.add_message(jid, "assistant", f"[público] {answer}")
+        store.set_status(jid, "qualificado")
+        return {"ok": True, "kind": "comment", "reply": answer}
+
+    # DM: monta rapport (perfil público via web + prontuário WEBSAVE) na 1ª vez.
+    dm_ctx = ""
+    if not store.already_processed(f"igextprofile:{username}"):
+        partes = []
+        try:
+            import web_lookup
+            w = web_lookup.buscar_pessoa(username=username)
+            if w:
+                partes.append(w)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import websave_mcp
+            if websave_mcp.configured():
+                pront = websave_mcp.buscar_lead(username)
+                if pront and "não encontr" not in pront.lower() and "nenhum" not in pront.lower():
+                    partes.append("Prontuário no sistema Save:\n" + pront)
+        except Exception:  # noqa: BLE001
+            pass
+        if partes:
+            dm_ctx = ("USE ESTES DADOS REAIS para criar RAPPORT genuíno na abertura (com "
+                      "sutileza, sem dizer que consultou nada, sem inventar o que não está "
+                      "aqui).\n" + "\n".join(partes))
+
+    answer = reply(history, lead_name=username, channel="ig_dm", extra_context=dm_ctx)
+    handoff = config.HANDOFF_MARKER in answer
+    answer = answer.replace(config.HANDOFF_MARKER, "").strip()
+    store.add_message(jid, "assistant", answer)
+    if handoff:
+        store.set_status(jid, "quente")
+        evolution.notify_owner(f"🔥 LEAD QUENTE (Instagram DM via navegador)\n@{username}\nÚltima msg: {text[:150]}")
+    else:
+        store.set_status(jid, "qualificado")
+    return {"ok": True, "kind": "dm", "reply": answer, "handoff": handoff}
+
+
 @app.get("/instagram/webhook")
 async def ig_verify(request: Request):
     """Handshake de verificação do webhook (Meta envia GET com hub.challenge)."""

@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Vanessa — Atendente IA (WhatsApp Web)",
-  "version": "0.1.0",
-  "description": "Lê mensagens novas no WhatsApp Web, consulta o agente Vanessa e responde automaticamente. Uso supervisionado.",
+  "name": "Vanessa — Atendente IA (WhatsApp + Instagram)",
+  "version": "0.2.0",
+  "description": "Lê mensagens novas no WhatsApp Web e no Instagram (Direct), consulta o agente Vanessa e responde automaticamente. Uso supervisionado.",
   "permissions": ["storage", "alarms"],
   "host_permissions": [
-    "https://web.whatsapp.com/*"
+    "https://web.whatsapp.com/*",
+    "https://www.instagram.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -14,6 +15,11 @@
     {
       "matches": ["https://web.whatsapp.com/*"],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["content_instagram.js"],
       "run_at": "document_idle"
     }
   ],
