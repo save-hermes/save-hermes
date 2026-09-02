@@ -6,6 +6,25 @@
  * content na página do WhatsApp.
  */
 
+// Defaults aplicados na instalação/atualização. Editáveis depois pelo popup.
+// (Pré-configurado para não depender de digitar no popup.)
+const DEFAULTS = {
+  agentUrl: "https://wins-showers-provinces-cartoons.trycloudflare.com",
+  token: "vQ-C2b71wFJKzL3rpzAfDGiBkK44TzlNX05W41_rMqk",
+  enabled: false, // começa DESATIVADA por segurança; ligar no popup quando quiser
+  minDelayMs: 1500,
+  maxDelayMs: 4000,
+};
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const cur = await chrome.storage.local.get(Object.keys(DEFAULTS));
+  const patch = {};
+  for (const [k, v] of Object.entries(DEFAULTS)) {
+    if (cur[k] === undefined) patch[k] = v;
+  }
+  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+});
+
 async function askAgent(payload) {
   const { agentUrl, token } = await chrome.storage.local.get(["agentUrl", "token"]);
   if (!agentUrl || !token) {
