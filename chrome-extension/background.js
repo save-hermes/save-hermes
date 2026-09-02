@@ -11,23 +11,19 @@
 const DEFAULTS = {
   agentUrl: "https://blond-twice-dare-daisy.trycloudflare.com",
   token: "vQ-C2b71wFJKzL3rpzAfDGiBkK44TzlNX05W41_rMqk",
-  enabled: false, // começa DESATIVADA por segurança; ligar no popup quando quiser
-  igEnabled: false, // Instagram (Direct via navegador) — ligar no popup quando quiser
+  enabled: true, // WhatsApp Web
+  igEnabled: true, // Instagram (Direct via navegador)
   minDelayMs: 1500,
   maxDelayMs: 4000,
   dailyLimit: 40, // teto diário de respostas no Instagram (anti-ban)
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const cur = await chrome.storage.local.get(Object.keys(DEFAULTS));
-  const patch = {};
-  for (const [k, v] of Object.entries(DEFAULTS)) {
-    if (cur[k] === undefined) patch[k] = v;
-  }
-  // Garante que a URL do agente aponte para o túnel atual (mesmo se já havia valor antigo).
-  patch.agentUrl = DEFAULTS.agentUrl;
-  patch.token = DEFAULTS.token;
-  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+  // Força os valores atuais no reload (garante túnel certo + canais ligados p/ teste).
+  await chrome.storage.local.set(DEFAULTS);
+});
+chrome.runtime.onStartup.addListener(async () => {
+  await chrome.storage.local.set({ agentUrl: DEFAULTS.agentUrl, token: DEFAULTS.token });
 });
 
 async function askAgent(payload) {
