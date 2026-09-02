@@ -1,34 +1,20 @@
 /*
  * content_instagram.js — roda dentro de https://www.instagram.com
  *
- * MODO REATIVO (mais seguro): a cada ciclo, a Vanessa
- *   1) abre o Direct (mensagens), lê threads com mensagem NÃO LIDA,
- *   2) pega a última mensagem recebida + o @username,
+ * MODO REATIVO: a cada ciclo, a Vanessa
+ *   1) na lista do Direct, acha conversas que precisam de resposta (última msg é
+ *      do lead, não nossa),
+ *   2) abre a conversa, lê a última mensagem recebida + o @username,
  *   3) pede a resposta ao agente (/ig/reply, kind="dm"),
- *   4) digita e envia como um humano logado (sem Graph API → sem App Review).
+ *   4) digita e envia como humano logado (sem Graph API → sem App Review).
  *
- * Comentários: quando a UI de notificações estiver aberta, também dá pra tratar,
- * mas o caminho estável é o Direct. Tudo falha de forma SEGURA: na dúvida, não envia.
- *
- * Anti-ban: intervalos aleatórios, 1 por ciclo, limite diário, ritmo humano.
- * O Instagram muda de layout com frequência — os seletores em SEL usam âncoras
- * estáveis (aria-label, role, href) e devem ser revisados se algo parar.
+ * Seletores validados no layout do Instagram (set/2026) via CDP:
+ *   - conversas na lista: div[role="button"] cujo texto contém "·" (tempo)
+ *   - mensagens: div[dir="auto"] (balão à ESQUERDA = recebida; à DIREITA = nossa)
+ *   - @username: link /usuario/ no header da conversa aberta
+ *   - campo de digitar: div[role="textbox"][contenteditable="true"]
+ * Falha SEGURA: na dúvida, não envia.
  */
-
-const SEL = {
-  // Link do Direct na navbar
-  directLink: 'a[href^="/direct/"]',
-  // Lista de threads no inbox do Direct
-  threadRow: 'div[role="listitem"], a[href^="/direct/t/"]',
-  // Marcador de não lida (bolinha azul / aria-label)
-  unreadHint: '[aria-label*="não lida" i], [aria-label*="unread" i], [aria-label*="Não lida" i]',
-  // Balões de mensagem na conversa aberta
-  msgRow: 'div[role="row"]',
-  // Campo de digitação do Direct
-  msgInput: 'div[role="textbox"][contenteditable="true"], textarea[placeholder*="Mensagem" i], textarea[placeholder*="Message" i]',
-  // Cabeçalho da conversa (tem o @username / nome)
-  convHeader: 'header a[href^="/"], header span[dir="auto"]',
-};
 
 let RUNNING = false;
 let SENT_TODAY = 0;
@@ -54,78 +40,105 @@ function resetDailyIfNeeded() {
 
 /* ---- Leitura do DOM ---------------------------------------------------- */
 
-// @username da conversa aberta (via URL ou header)
-function readOpenUser() {
-  const header = document.querySelector('header');
-  if (header) {
-    const link = header.querySelector('a[href^="/"]');
-    if (link) {
-      const h = link.getAttribute("href") || "";
-      const u = h.replace(/\//g, "").trim();
-      if (u) return u;
+// Lista de conversas: div[role="button"] cujo texto tem "·" (marcador de tempo).
+function listConversations() {
+  return [...document.querySelectorAll('div[role="button"]')].filter((b) => {
+    const t = b.innerText || "";
+    return t.includes("·") && t.trim().length > 6 && t.length < 240;
+  });
+}
+
+// Uma conversa "precisa de resposta" se a última linha de prévia NÃO é nossa.
+// Prévia começando com "Você:" = nós respondemos por último → ignora.
+function needsReply(convEl) {
+  const t = convEl.innerText || "";
+  if (/(^|\n)\s*Você:/i.test(t)) return false;      // nós fomos os últimos
+  if (/enviou um (vídeo|anexo|áudio|story)/i.test(t)) return false; // mídia, não texto
+  return true;
+}
+
+// Nome/prévia da conversa (para dedup e log).
+function convSummary(convEl) {
+  const lines = (convEl.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const name = lines[0] || "";
+  const preview = lines.slice(1).find((l) => l && l !== "·" && !/^\d/.test(l)) || "";
+  return { name, preview };
+}
+
+// @username do contato na conversa ABERTA (link de perfil no header).
+function readOpenUsername() {
+  // o header tem um link /usuario/ com o nome; pega o primeiro link de perfil
+  // que não seja da própria conta nem de navegação.
+  const skip = ["/reels/", "/explore/", "/direct/", "/saveeducacao.oficial/"];
+  const links = [...document.querySelectorAll('a[href^="/"]')];
+  for (const a of links) {
+    const h = a.getAttribute("href") || "";
+    if (h.split("/").length <= 3 && h.length > 1 && !skip.includes(h)) {
+      // precisa ter texto (nome) — evita ícones
+      if ((a.innerText || "").trim()) return h.replace(/\//g, "").trim();
     }
-    const span = header.querySelector('span[dir="auto"]');
-    if (span && span.innerText) return span.innerText.trim();
   }
   return "";
 }
 
-// Última mensagem recebida (não enviada por nós) da conversa aberta.
+// Última mensagem RECEBIDA (balão à esquerda) da conversa aberta.
 function readLastIncoming() {
-  const rows = document.querySelectorAll(SEL.msgRow);
-  if (!rows.length) return null;
-  // Heurística: mensagens NOSSAS costumam estar alinhadas à direita.
-  // Pegamos a última linha que tenha texto e NÃO seja claramente nossa.
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    const txt = (row.innerText || "").trim();
-    if (!txt) continue;
-    // linha "nossa" tende a ter o botão de reação à esquerda / estilo próprio.
-    // Sem classe estável; usamos posição: se o conteúdo está mais à direita, é nossa.
-    const rect = row.getBoundingClientRect();
-    const mid = window.innerWidth / 2;
-    const isOurs = rect.left > mid; // aproximação; ajuste se necessário
-    if (!isOurs) {
-      return { text: txt.slice(0, 500), rowIndex: i, lastIsIncoming: i === rows.length - 1 || true };
+  const msgs = [...document.querySelectorAll('div[dir="auto"]')].filter((e) => {
+    const t = (e.innerText || "").trim();
+    return t && t.length > 1 && !/^\d{1,2}:\d{2}$/.test(t) && !/indisponível/i.test(t);
+  });
+  const W = window.innerWidth;
+  let lastIncoming = null;
+  for (const e of msgs) {
+    // sobe até o balão (ancestral com largura < 70% da janela)
+    let box = e, found = null;
+    for (let i = 0; i < 10 && box; i++) {
+      const r = box.getBoundingClientRect();
+      if (r.width > 10 && r.width < W * 0.7) found = r;
+      if (r.width >= W * 0.7) break;
+      box = box.parentElement;
     }
+    if (!found) continue;
+    const center = (found.left + found.right) / 2;
+    const isOurs = center > W * 0.55; // nossas ficam à direita
+    if (!isOurs) lastIncoming = (e.innerText || "").trim();
+    else lastIncoming = lastIncoming; // mantém; se a última for nossa, tratamos abaixo
   }
-  return null;
+  // se a ÚLTIMA mensagem da conversa for nossa, não há o que responder
+  const lastMsgEl = msgs[msgs.length - 1];
+  if (lastMsgEl) {
+    let box = lastMsgEl, found = null;
+    for (let i = 0; i < 10 && box; i++) {
+      const r = box.getBoundingClientRect();
+      if (r.width > 10 && r.width < W * 0.7) found = r;
+      if (r.width >= W * 0.7) break;
+      box = box.parentElement;
+    }
+    if (found && (found.left + found.right) / 2 > W * 0.55) return null; // última é nossa
+  }
+  return lastIncoming;
 }
 
 /* ---- Ações no DOM ------------------------------------------------------ */
 
-function setNativeValue(el, value) {
+function setEditable(el, value) {
   el.focus();
   try { document.execCommand("selectAll", false, null); } catch (e) {}
-  try { document.execCommand("insertText", false, value); return; } catch (e) {}
-  // fallback textarea
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
-  if (setter && setter.set) { setter.set.call(el, value); el.dispatchEvent(new Event("input", { bubbles: true })); }
+  try { document.execCommand("insertText", false, value); return true; } catch (e) {}
+  return false;
 }
 
 async function typeAndSend(text) {
-  const input = document.querySelector(SEL.msgInput);
+  const input = document.querySelector('div[role="textbox"][contenteditable="true"]')
+    || document.querySelector("textarea");
   if (!input) { log("campo de digitação não encontrado"); return false; }
-  setNativeValue(input, text);
-  await sleep(rand(600, 1600));
+  setEditable(input, text);
+  await sleep(rand(700, 1800));
   const enter = new KeyboardEvent("keydown", {
     bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13,
   });
   input.dispatchEvent(enter);
   return true;
-}
-
-// Abre a primeira thread não lida do inbox. Retorna true se abriu alguma.
-function openFirstUnreadThread() {
-  const rows = document.querySelectorAll(SEL.threadRow);
-  for (const row of rows) {
-    if (row.querySelector(SEL.unreadHint) || /não lida|unread/i.test(row.getAttribute("aria-label") || "")) {
-      const clickable = row.closest("a") || row.querySelector("a") || row;
-      clickable.click();
-      return true;
-    }
-  }
-  return false;
 }
 
 /* ---- Loop principal ---------------------------------------------------- */
@@ -138,31 +151,39 @@ async function tick() {
     resetDailyIfNeeded();
     if (!CONFIG.igEnabled || !CONFIG.agentUrl || !CONFIG.token) return;
     if (SENT_TODAY >= CONFIG.dailyLimit) { log("limite diário atingido:", SENT_TODAY); return; }
+    if (!location.pathname.startsWith("/direct/")) return; // precisa estar no Direct
 
-    // Precisa estar na área do Direct.
-    if (!location.pathname.startsWith("/direct/")) {
-      const dl = document.querySelector(SEL.directLink);
-      if (dl) { dl.click(); await sleep(rand(1500, 3000)); }
-      else return; // não achou o Direct; espera próximo ciclo
+    // 1) acha uma conversa que precisa de resposta
+    const convs = listConversations();
+    let target = null, summary = null;
+    for (const c of convs) {
+      if (!needsReply(c)) continue;
+      const s = convSummary(c);
+      const key = `${s.name}:${s.preview}`;
+      if (processed.has(key)) continue;
+      target = c; summary = s; target._key = key;
+      break;
     }
+    if (!target) return;
 
-    const opened = openFirstUnreadThread();
-    if (!opened) return;
-    await sleep(rand(1200, 2600)); // deixa a conversa carregar
+    log("conversa p/ responder:", summary.name, "->", summary.preview);
+    target.click();
+    await sleep(rand(1500, 3000)); // carrega a conversa
 
-    const username = readOpenUser();
-    const last = readLastIncoming();
-    if (!username || !last || !last.text) return;
+    const username = readOpenUsername();
+    const lastMsg = readLastIncoming();
+    if (!username || !lastMsg) { log("sem username/msg — pulando", {username, lastMsg}); RUNNING = false; return; }
 
-    const key = `${username}:${last.text.slice(0, 40)}`;
+    const key = `${username}:${lastMsg.slice(0, 40)}`;
     if (processed.has(key)) return;
     processed.add(key);
+    processed.add(target._key);
 
-    log("nova DM de", username, "->", last.text);
+    log("DM de @" + username, "->", lastMsg);
 
     const resp = await chrome.runtime.sendMessage({
       type: "ASK_IG",
-      payload: { kind: "dm", id: key, username, text: last.text },
+      payload: { kind: "dm", id: key, username, text: lastMsg },
     });
     if (!resp || !resp.ok) { log("agente não respondeu:", resp && resp.error); return; }
     if (resp.dup) { log("duplicado — ignora"); return; }
@@ -180,9 +201,9 @@ async function tick() {
   }
 }
 
-// Ciclo com intervalo aleatório longo (anti-ban). 45s–90s entre passadas.
+// Ciclo com intervalo aleatório (anti-ban). 45s–90s entre passadas.
 function loop() {
   tick().finally(() => setTimeout(loop, rand(45000, 90000)));
 }
 loop();
-log("content script IG carregado. Configure no popup e ative (igEnabled).");
+log("content script IG carregado (v2 seletores 2026). Configure e ative igEnabled.");
