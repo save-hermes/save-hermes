@@ -74,6 +74,31 @@ def private_reply(comment_id: str, text: str) -> bool:
     )
 
 
+def get_user_profile(igsid: str) -> dict:
+    """Busca o perfil de quem mandou DM — SOMENTE os campos que a Meta libera.
+
+    A API de mensagens do Instagram expõe apenas: name, username, follower_count,
+    is_user_follow_business, is_business_follow_user, is_verified_user, profile_pic.
+    NÃO existe acesso a posts, bio ou interesses da pessoa (privacidade da Meta).
+    Falha de forma segura: retorna {} em erro.
+    """
+    if not igsid:
+        return {}
+    url = f"{_base()}/{igsid}"
+    fields = ("name,username,profile_pic,follower_count,is_verified_user,"
+              "is_user_follow_business,is_business_follow_user")
+    try:
+        r = httpx.get(url, params={"fields": fields, "access_token": config.IG_ACCESS_TOKEN},
+                      timeout=20)
+        if r.status_code >= 400:
+            log.warning("Perfil IG %s indisponível (%s): %s", igsid, r.status_code, r.text[:150])
+            return {}
+        return r.json()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Erro ao buscar perfil IG %s: %s", igsid, e)
+        return {}
+
+
 def hide_comment(comment_id: str, hide: bool = True) -> bool:
     """Oculta/reexibe um comentário (útil para spam/hostil). Não usar sozinho."""
     url = f"{_base()}/{comment_id}"

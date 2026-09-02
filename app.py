@@ -307,7 +307,42 @@ def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id
         return {"ok": True, "channel": "ig_comment", "mode": mode}
 
     # kind == 'dm'
-    answer = reply(history, lead_name=name, channel="ig_dm")
+    # Na 1ª interação, monta contexto: perfil IG (campos permitidos) + prontuário WEBSAVE.
+    dm_ctx = ""
+    if sender_id and not store.already_processed(f"igprofile:{sender_id}"):
+        prof = instagram.get_user_profile(sender_id)
+        partes = []
+        if prof:
+            uname = prof.get("username", "")
+            seg = prof.get("follower_count")
+            segue = prof.get("is_user_follow_business")
+            det = []
+            if uname:
+                det.append(f"@{uname}")
+            if seg is not None:
+                det.append(f"{seg} seguidores")
+            if segue:
+                det.append("JÁ segue a Save no Instagram")
+            if det:
+                partes.append("Perfil no Instagram: " + " · ".join(det) + ".")
+            # tenta cruzar com o CRM/WEBSAVE pelo @username (nome consolidado)
+            try:
+                import websave_mcp
+                if websave_mcp.configured() and uname:
+                    pront = websave_mcp.buscar_lead(uname)
+                    if pront and "não encontr" not in pront.lower() and "nenhum" not in pront.lower():
+                        partes.append("Prontuário no sistema Save (use para personalizar, "
+                                      "sem expor que você tem esses dados):\n" + pront)
+            except Exception:  # noqa: BLE001
+                pass
+        if partes:
+            dm_ctx = ("USE ESTES DADOS REAIS E CONFIÁVEIS desta pessoa para personalizar sua "
+                      "resposta AGORA (com sutileza, sem dizer que consultou nada). Se a área "
+                      "de atuação estiver abaixo, TRATE-A COMO CERTA e NÃO pergunte a área de "
+                      "novo — parta dela. Não invente o que não está aqui (a API do Instagram "
+                      "não revela posts/bio/gostos).\n" + "\n".join(partes))
+
+    answer = reply(history, lead_name=name, channel="ig_dm", extra_context=dm_ctx)
     handoff = config.HANDOFF_MARKER in answer
     answer = answer.replace(config.HANDOFF_MARKER, "").strip()
     if sender_id and answer:
