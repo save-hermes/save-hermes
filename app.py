@@ -26,10 +26,11 @@ log = logging.getLogger("app")
 
 app = FastAPI(title="WhatsApp Sales Agent")
 
-# A extensão do Chrome (WhatsApp Web) faz POST /reply de outra origem.
+# A extensão do Chrome (WhatsApp Web e Instagram) faz POST /reply e /ig/reply de
+# outra origem. O popup da extensão tem origem chrome-extension://<id>.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://web.whatsapp.com"],
+    allow_origin_regex=r"^(https://web\.whatsapp\.com|https://(www\.)?instagram\.com|chrome-extension://.*)$",
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
 )
