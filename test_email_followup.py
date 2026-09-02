@@ -28,7 +28,7 @@ store.init()
 _sent = []
 
 
-def _fake_send(to_addr, subject, body, in_reply_to=None, references=None):
+def _fake_send(to_addr, subject, body, in_reply_to=None, references=None, lead_name="", html=None):
     _sent.append({"to": to_addr, "subject": subject, "body": body, "irt": in_reply_to})
     return {"ok": True, "message_id": f"<{len(_sent)}@test>"}
 

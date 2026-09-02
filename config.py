@@ -83,6 +83,15 @@ EMAIL_SIGNATURE = os.getenv(
 # Limite diário de e-mails enviados (deliverability/anti-spam). 0 = sem limite.
 EMAIL_DAILY_LIMIT = int(os.getenv("EMAIL_DAILY_LIMIT", "50"))
 
+# === Aparência do e-mail (template HTML da marca) ===
+# Se True, os e-mails saem em HTML branded (header+logo+CTA+rodapé); o texto puro
+# vai junto como alternativa (multipart). Se False, só texto puro.
+EMAIL_HTML = os.getenv("EMAIL_HTML", "true").strip().lower() in ("1", "true", "yes", "sim")
+# URL do logo no header (PNG hospedado). Vazio = usa texto "Save Educação".
+EMAIL_LOGO_URL = os.getenv("EMAIL_LOGO_URL", "https://qtgbuviglrwhypizypgb.supabase.co/storage/v1/object/public/patrocinadores/email-logo.png").strip()
+# Link de suporte no rodapé.
+EMAIL_SUPPORT_URL = os.getenv("EMAIL_SUPPORT_URL", "https://edu.saveeducacao.com.br/suporte/publico").strip()
+
 # === Resend (provedor de ENVIO de e-mail — opcional) ===
 # Se RESEND_API_KEY estiver preenchida, o envio usa a API do Resend (deliverability
 # alta + logs de entrega/abertura). Caso contrário, cai no SMTP da caixa (híbrido:

@@ -34,26 +34,40 @@ def send(
     body: str,
     in_reply_to: str | None = None,
     references: str | None = None,
+    lead_name: str = "",
+    html: bool | None = None,
 ) -> dict:
-    """Envia um e-mail de texto. Usa Resend se houver RESEND_API_KEY, senão SMTP.
+    """Envia um e-mail. Usa Resend se houver RESEND_API_KEY, senão SMTP.
 
-    in_reply_to/references mantêm o threading quando é uma RESPOSTA a um e-mail
-    existente (o cliente do lead agrupa na mesma conversa).
+    Se config.EMAIL_HTML (ou html=True), embrulha o corpo no template branded da
+    Save e envia multipart (HTML + texto). in_reply_to/references mantêm o
+    threading quando é RESPOSTA a um e-mail existente.
     """
     if not to_addr:
         return {"ok": False, "error": "no_recipient"}
 
-    # Anexa a assinatura, se ainda não estiver no corpo.
+    # Anexa a assinatura ao TEXTO puro, se ainda não estiver.
     full_body = body.rstrip()
     if config.EMAIL_SIGNATURE and config.EMAIL_SIGNATURE not in full_body:
         full_body = f"{full_body}\n\n{config.EMAIL_SIGNATURE}"
 
+    # Gera a versão HTML branded (usada quando habilitado).
+    use_html = config.EMAIL_HTML if html is None else html
+    html_body = None
+    if use_html:
+        try:
+            import email_template
+            html_body = email_template.render(body, subject=subject, lead_name=lead_name)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Falha ao renderizar HTML, caindo p/ texto: %s", e)
+            html_body = None
+
     if config.RESEND_API_KEY:
-        return _send_resend(to_addr, subject, full_body, in_reply_to, references)
-    return _send_smtp(to_addr, subject, full_body, in_reply_to, references)
+        return _send_resend(to_addr, subject, full_body, in_reply_to, references, html_body)
+    return _send_smtp(to_addr, subject, full_body, in_reply_to, references, html_body)
 
 
-def _send_resend(to_addr, subject, full_body, in_reply_to, references) -> dict:
+def _send_resend(to_addr, subject, full_body, in_reply_to, references, html_body=None) -> dict:
     """Envio via API do Resend (HTTP). Deliverability alta + logs no painel Resend."""
     import httpx
     frm = config.RESEND_FROM or formataddr((config.EMAIL_FROM_NAME, config.EMAIL_ADDRESS))
@@ -63,6 +77,8 @@ def _send_resend(to_addr, subject, full_body, in_reply_to, references) -> dict:
         "subject": subject,
         "text": full_body,
     }
+    if html_body:
+        payload["html"] = html_body
     headers = {}
     if in_reply_to:
         headers["In-Reply-To"] = in_reply_to
@@ -87,7 +103,7 @@ def _send_resend(to_addr, subject, full_body, in_reply_to, references) -> dict:
         return {"ok": False, "error": f"resend: {e}"}
 
 
-def _send_smtp(to_addr, subject, full_body, in_reply_to, references) -> dict:
+def _send_smtp(to_addr, subject, full_body, in_reply_to, references, html_body=None) -> dict:
     """Envio via SMTP da caixa do domínio (fallback quando não há Resend)."""
     if not (config.EMAIL_ADDRESS and config.EMAIL_APP_PASSWORD):
         return {"ok": False, "error": "email_not_configured"}
@@ -101,6 +117,8 @@ def _send_smtp(to_addr, subject, full_body, in_reply_to, references) -> dict:
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = (references + " " if references else "") + in_reply_to
     msg.attach(MIMEText(full_body, "plain", "utf-8"))
+    if html_body:
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as s:
