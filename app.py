@@ -6,13 +6,16 @@ Fluxo:
     -> resposta enviada pela Evolution -> estado do lead gravado no SQLite.
 """
 import logging
+import hashlib
+import hmac
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import evolution
+import instagram
 import store
 from brain import reply
 
@@ -51,6 +54,7 @@ def health():
         "config_missing": config.validate(),
         "whatsapp": state,
         "knowledge_base": knowledge.status(),
+        "instagram": instagram.status(),
     }
 
 
@@ -206,3 +210,135 @@ async def reply_endpoint(request: Request):
         "text": text,
     }
     return _process(info, deliver=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INSTAGRAM (Meta Graph API) — DMs e comentários
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _ig_valid_signature(raw: bytes, header: str) -> bool:
+    """Valida X-Hub-Signature-256 usando o App Secret. Se não houver secret
+    configurado, não bloqueia (útil em testes), mas loga um aviso."""
+    if not config.IG_APP_SECRET:
+        log.warning("IG_APP_SECRET não configurado — pulando validação de assinatura.")
+        return True
+    if not header or not header.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(
+        config.IG_APP_SECRET.encode(), raw, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, header)
+
+
+def _ig_process(kind: str, sender_id: str, text: str, name: str = "", comment_id: str = "") -> dict:
+    """Cérebro compartilhado para eventos do Instagram.
+
+    kind: 'dm' (mensagem no Direct) | 'comment' (comentário em post).
+    Reusa Claude + playbook + base de conhecimento + admin gate. O admin do
+    Instagram é identificado pelo IGSID configurado (ADMIN_NUMBER não se aplica a
+    IG); por padrão, no IG ninguém é admin (ajuste se quiser um IGSID de admin).
+    """
+    jid = f"ig_{kind}:{sender_id or comment_id}"
+    if store.already_processed(f"ig:{comment_id or sender_id}:{hash(text) & 0xffffffff}"):
+        return {"ok": True, "dup": True}
+
+    store.get_or_create_lead(jid, sender_id or comment_id, name)
+    store.add_message(jid, "user", text)
+
+    # Limite diário (warming vale para IG também)
+    if config.DAILY_SEND_LIMIT > 0 and store.assistant_msgs_today() >= config.DAILY_SEND_LIMIT:
+        log.warning("Limite diário atingido — pulando resposta IG a %s", jid)
+        return {"ok": True, "skipped": "daily_limit_reached"}
+
+    history = store.get_history(jid, limit=20)
+
+    if kind == "comment":
+        mode = config.IG_COMMENT_MODE
+        # Resposta pública (curta) — se o modo inclui 'public'
+        if mode in ("public", "both"):
+            pub = reply(history, lead_name=name, channel="ig_comment_public")
+            pub = pub.replace(config.HANDOFF_MARKER, "").strip()
+            if comment_id and pub:
+                instagram.reply_comment(comment_id, pub)
+                store.add_message(jid, "assistant", f"[público] {pub}")
+        # DM privado (detalhe) — se o modo inclui 'dm'
+        if mode in ("dm", "both"):
+            dm = reply(history, lead_name=name, channel="ig_comment_dm")
+            dm = dm.replace(config.HANDOFF_MARKER, "").strip()
+            if comment_id and dm:
+                instagram.private_reply(comment_id, dm)
+                store.add_message(jid, "assistant", f"[dm] {dm}")
+        store.set_status(jid, "qualificado")
+        return {"ok": True, "channel": "ig_comment", "mode": mode}
+
+    # kind == 'dm'
+    answer = reply(history, lead_name=name, channel="ig_dm")
+    handoff = config.HANDOFF_MARKER in answer
+    answer = answer.replace(config.HANDOFF_MARKER, "").strip()
+    if sender_id and answer:
+        instagram.send_dm(sender_id, answer)
+    store.add_message(jid, "assistant", answer)
+    if handoff:
+        store.set_status(jid, "quente")
+        evolution.notify_owner(
+            f"🔥 LEAD QUENTE (Instagram DM)\nIGSID: {sender_id}\n"
+            f"Última msg: {text[:150]}"
+        )
+    else:
+        store.set_status(jid, "qualificado")
+    return {"ok": True, "channel": "ig_dm", "handoff": handoff, "reply": answer}
+
+
+@app.get("/instagram/webhook")
+async def ig_verify(request: Request):
+    """Handshake de verificação do webhook (Meta envia GET com hub.challenge)."""
+    p = request.query_params
+    if p.get("hub.mode") == "subscribe" and p.get("hub.verify_token") == config.IG_VERIFY_TOKEN:
+        return PlainTextResponse(p.get("hub.challenge", ""))
+    return JSONResponse({"error": "verification failed"}, status_code=403)
+
+
+@app.post("/instagram/webhook")
+async def ig_webhook(request: Request):
+    """Recebe eventos do Instagram: mensagens (Direct) e comentários."""
+    raw = await request.body()
+    if not _ig_valid_signature(raw, request.headers.get("X-Hub-Signature-256", "")):
+        return JSONResponse({"error": "bad signature"}, status_code=401)
+
+    body = await request.json()
+    if body.get("object") != "instagram":
+        return {"ignored": body.get("object")}
+
+    results = []
+    for entry in body.get("entry", []):
+        # 1) Mensagens do Direct
+        for m in entry.get("messaging", []):
+            sender = (m.get("sender") or {}).get("id", "")
+            # ignora echoes (mensagens que NÓS enviamos)
+            if (m.get("message") or {}).get("is_echo"):
+                continue
+            # ignora nossas próprias msgs pelo IG_USER_ID
+            if sender and sender == config.IG_USER_ID:
+                continue
+            text = (m.get("message") or {}).get("text", "").strip()
+            if not text:
+                continue
+            results.append(_ig_process("dm", sender_id=sender, text=text))
+
+        # 2) Comentários (changes com field='comments')
+        for ch in entry.get("changes", []):
+            if ch.get("field") != "comments":
+                continue
+            v = ch.get("value") or {}
+            # ignora comentários do próprio dono da conta
+            frm = v.get("from") or {}
+            if frm.get("id") and frm.get("id") == config.IG_USER_ID:
+                continue
+            comment_id = v.get("id", "")
+            text = (v.get("text") or "").strip()
+            name = frm.get("username", "")
+            if not text or not comment_id:
+                continue
+            results.append(_ig_process("comment", sender_id=frm.get("id", ""), text=text, name=name, comment_id=comment_id))
+
+    return {"ok": True, "processed": len(results), "results": results}

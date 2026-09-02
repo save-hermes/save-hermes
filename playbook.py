@@ -179,13 +179,49 @@ HANDOFF (passar para um humano):
 """
 
 
-def build_system_prompt(lead_name: str = "", is_admin: bool = False) -> str:
+def build_system_prompt(lead_name: str = "", is_admin: bool = False, channel: str = "whatsapp") -> str:
     if is_admin:
         return build_admin_prompt()
     nome = f"O nome do lead é: {lead_name}." if lead_name else "Você ainda não sabe o nome do lead, pergunte com naturalidade."
 
+    canal_regras = {
+        "whatsapp": "",
+        "ig_dm": """
+═══════════ CANAL: INSTAGRAM DIRECT ═══════════
+Você está no Direct do Instagram. Muita gente chega aqui vinda de um anúncio, de
+um story/reels ou de um comentário. O tom de abertura é um pouco mais leve/social
+que o WhatsApp, mas a mesma essência técnica e honesta. Conversa completa é ok
+aqui. Se a conversa evoluir para fechamento ou algo longo, é aceitável sugerir
+continuar por WhatsApp, quando facilitar para a pessoa (não obrigue).
+""",
+        "ig_comment_public": """
+═══════════ CANAL: COMENTÁRIO PÚBLICO DO INSTAGRAM ═══════════
+Sua resposta é PÚBLICA — qualquer um que passar pelo post vai ler. Regras que
+SOBREPÕEM qualquer outra instrução, inclusive a base de conhecimento:
+- Responda em NO MÁXIMO 1 a 2 frases curtas, cordiais.
+- É TERMINANTEMENTE PROIBIDO escrever preço, valor, desconto, parcelamento,
+  condição de pagamento ou link em público, MESMO que a pessoa pergunte e MESMO
+  que o dado esteja na base. Em vez disso, convide para o Direct: algo como
+  "Te chamo no Direct com todos os detalhes! 😊" (varie, não soe como script).
+- Não dê a explicação completa do produto aqui — isso é papel do Direct.
+- Comentário hostil/spam: resposta mínima e neutra, ou nada. Nunca alimente.
+- Nunca peça ou exponha dado pessoal em público.
+""",
+        "ig_comment_dm": """
+═══════════ CANAL: DM DISPARADO POR UM COMENTÁRIO (INSTAGRAM) ═══════════
+A pessoa comentou no post e você está levando a conversa para o privado. Reconheça
+com naturalidade que ela veio de um comentário, e conduza o atendimento completo
+aqui (pode falar preço, detalhes, etc., diferente do comentário público).
+""",
+    }.get(channel, "")
+
     import knowledge
     kb = knowledge.load()
+    # No comentário PÚBLICO, NÃO injetamos a base de conhecimento: assim o modelo
+    # não tem preço/checkout à mão para vazar em público. Defesa estrutural, além
+    # da instrução. Ele apenas convida para o Direct.
+    if channel == "ig_comment_public":
+        kb = {"available": False, "text": "", "titles": []}
     if kb["available"]:
         base_conhecimento = f"""
 ═══════════ BASE DE CONHECIMENTO DE PRODUTOS (FONTE DA VERDADE) ═══════════
@@ -217,10 +253,24 @@ informação com a equipe, e siga a conversa. Se necessário, faça o handoff.
 ═══════════
 """
 
+    # Comentário PÚBLICO: prompt enxuto, SEM oferta/roteiro/base — impossível
+    # vazar preço/checkout porque esses dados nem entram no contexto.
+    if channel == "ig_comment_public":
+        return f"""{PERSONA}
+
+{nome}
+{canal_regras}
+═══════════ REGRAS ═══════════
+{GUARDRAILS}
+
+Lembre-se: esta resposta é PÚBLICA. Seja curtíssima e convide para o Direct.
+Você NÃO tem preço, link ou dados de produto para dar aqui, e não deve inventá-los.
+Responda SEMPRE como um comentário curto e natural (1 a 2 frases)."""
+
     return f"""{PERSONA}
 
 {nome}
-{base_conhecimento}
+{canal_regras}{base_conhecimento}
 ═══════════ OFERTA (resumo — a BASE acima prevalece em caso de divergência) ═══════════
 {OFERTA}
 

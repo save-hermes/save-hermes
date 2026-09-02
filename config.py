@@ -45,6 +45,23 @@ CHECKOUT_URL = os.getenv("CHECKOUT_URL", "").strip()
 # Marcador que o modelo emite quando quer passar a conversa para um humano
 HANDOFF_MARKER = "[[HANDOFF]]"
 
+# === Instagram (Meta Graph API) ===
+# Token de acesso de longa duração (Page/IG). Cole no ambiente, nunca no código.
+IG_ACCESS_TOKEN = os.getenv("IG_ACCESS_TOKEN", "").strip()
+# ID da conta do Instagram Business (IG User ID) — numérico.
+IG_USER_ID = os.getenv("IG_USER_ID", "").strip()
+# Token de verificação do webhook (VOCÊ inventa; a Meta ecoa no handshake GET).
+IG_VERIFY_TOKEN = os.getenv("IG_VERIFY_TOKEN", "").strip()
+# App Secret da Meta — usado para validar a assinatura X-Hub-Signature-256.
+IG_APP_SECRET = os.getenv("IG_APP_SECRET", "").strip()
+# Versão da Graph API.
+IG_GRAPH_VERSION = os.getenv("IG_GRAPH_VERSION", "v23.0").strip()
+# Se True, ao receber um comentário a Vanessa também manda um DM privado (private
+# reply) além (ou em vez) de responder publicamente. Ver IG_COMMENT_MODE.
+# Modos: "public" (só responde no comentário), "dm" (só private reply),
+#        "both" (responde curtinho no comentário E manda DM com o detalhe).
+IG_COMMENT_MODE = os.getenv("IG_COMMENT_MODE", "both").strip()
+
 
 def _digits(n: str) -> str:
     return "".join(ch for ch in (n or "") if ch.isdigit())
