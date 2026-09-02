@@ -53,6 +53,34 @@ def _collect_new(origem: str, need: int, page_size: int = 50) -> list[dict]:
     return out
 
 
+def _route_lp_lead(email: str) -> tuple[str, str]:
+    """Descobre a LP de origem do lead e devolve (flow_id, source_com_slug).
+
+    Consulta o WEBSAVE (buscar_lead) para achar o slug da LP; usa products_map
+    para escolher o fluxo (parceria vs. nutrição) e registrar o produto certo.
+    """
+    import products_map
+    import re
+    slug = ""
+    try:
+        perfil = websave_mcp.buscar_lead(email)
+        # A LP aparece no perfil; tentamos extrair um slug conhecido do mapa.
+        low = (perfil or "").lower()
+        for known in products_map.LP_MAP:
+            if known in low:
+                slug = known
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    info = products_map.lookup(slug)
+    if info["intencao"] == "parceria":
+        flow_id = flows.PARCERIA_FLOW_ID
+    else:
+        flow_id = flows.DEFAULT_FLOW_ID
+    source = f"websave_lp:{slug}" if slug else "websave_lp"
+    return flow_id, source
+
+
 def run_intake(daily_cap: int | None = None, dry_run: bool = True) -> dict:
     """Capta leads novos respeitando a prioridade dos tiers e o teto diário.
 
@@ -82,8 +110,13 @@ def run_intake(daily_cap: int | None = None, dry_run: bool = True) -> dict:
                 "amostra": [l["email"] for l in novos[:5]]}
         if not dry_run:
             for lead in novos:
+                # Tier 1 (LP): roteia por LP/intenção (parceria vs. nutrição do produto certo).
+                if origem == "lp":
+                    fid, src = _route_lp_lead(lead["email"])
+                else:
+                    fid, src = flow_id, f"websave_{origem}"
                 r = flows.ingest_lead(email=lead["email"], name=lead.get("nome", ""),
-                                      source=f"websave_{origem}", flow_id=flow_id)
+                                      source=src, flow_id=fid)
                 if r.get("enrolled"):
                     info["captados"] += 1
                     total_captados += 1

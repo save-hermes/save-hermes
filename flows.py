@@ -43,6 +43,8 @@ def ensure_default_flow() -> None:
         store.upsert_flow(MQL_FLOW_ID, "MQL — leads qualificados (quiz)", MQL_FLOW_STEPS)
     if not store.get_flow(POSWEBINAR_FLOW_ID):
         store.upsert_flow(POSWEBINAR_FLOW_ID, "Pós-webinário — aquecimento", POSWEBINAR_FLOW_STEPS)
+    if not store.get_flow(PARCERIA_FLOW_ID):
+        store.upsert_flow(PARCERIA_FLOW_ID, "Parceria — qualificação + handoff", PARCERIA_FLOW_STEPS)
 
 
 # Fluxo MQL (lead veio de quiz, já demonstrou intenção): aborda direto, mais consultivo.
@@ -66,6 +68,14 @@ POSWEBINAR_FLOW_STEPS = [
      "goal": "Conecte o conteúdo do webinário à necessidade de ir além (do conceito para a prática). Apresente a Pré-Especialização como o próximo passo natural de quem gostou da aula. Argumento técnico, convite leve."},
     {"delay_h": 168, "subject": "Condição da Pré-Especialização",
      "goal": "E-mail de OFERTA para quem veio de webinário. Apresente a oferta (R$ 197, campanha, parcelável) com ancoragem de valor e garantia de 7 dias, incluindo o link de checkout. Chamada clara."},
+]
+
+# Fluxo PARCERIA: lead veio de LP de captação de parceiro (NÃO é comprador de curso).
+# A Vanessa qualifica com leveza e faz HANDOFF para um humano — nunca oferece curso.
+PARCERIA_FLOW_ID = "parceria"
+PARCERIA_FLOW_STEPS = [
+    {"delay_h": 0, "subject": "Sobre a parceria com a Save",
+     "goal": "O lead demonstrou interesse em ser PARCEIRO da Save (não é comprador de curso). Cumprimente, agradeça o interesse na parceria e faça 1 ou 2 perguntas de qualificação (área de atuação, se já atende clientes na área, o que busca com a parceria). Tom profissional. NÃO ofereça curso nem preço. Ao final, sinalize que um responsável vai dar sequência. Emita o marcador de handoff."},
 ]
 
 
@@ -157,9 +167,24 @@ def run_once(deliver_email=None) -> dict:
             continue
 
         step = steps[step_idx]
-        # A Vanessa gera o texto do e-mail conforme o objetivo do passo.
+        # Descobre o PRODUTO certo pela origem/LP do lead (não empurra sempre a Pré-Espec.).
+        produto_ctx = ""
+        try:
+            import products_map
+            src = (lead.get("source") or "")
+            slug = src.split("lp:", 1)[1] if "lp:" in src else ""
+            info = products_map.lookup(slug) if slug else {"produto": products_map.PRODUTO_ANCORA, "intencao": "venda_curso"}
+            produto_ctx = (f"[PRODUTO/INTENÇÃO DESTE LEAD] Produto a promover: {info['produto']}. "
+                           f"Intenção: {info['intencao']}. Ofereça ESTE produto, não outro.")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # A Vanessa gera o texto do e-mail conforme o objetivo do passo + produto certo.
         history = store.get_history(jid, limit=10)
-        instr = {"role": "user", "content": f"[OBJETIVO DESTE E-MAIL DO FLUXO] {step.get('goal','')}"}
+        parts = [f"[OBJETIVO DESTE E-MAIL DO FLUXO] {step.get('goal','')}"]
+        if produto_ctx:
+            parts.append(produto_ctx)
+        instr = {"role": "user", "content": "\n".join(parts)}
         try:
             body = reply(history + [instr], lead_name=lead.get("name", ""), channel="email_campaign")
         except Exception as e:  # noqa: BLE001
@@ -167,6 +192,7 @@ def run_once(deliver_email=None) -> dict:
             store.advance_flow(enr["id"], step_idx, int(time.time()) + 1800, status="ativo")
             skipped += 1
             continue
+        handoff = config.HANDOFF_MARKER in body
         body = body.replace(config.HANDOFF_MARKER, "").strip()
         subject = step.get("subject") or "Save Educação"
 
@@ -177,6 +203,22 @@ def run_once(deliver_email=None) -> dict:
             continue
 
         store.add_message(jid, "assistant", f"[fluxo:{flow['id']}#{step_idx}] {body}")
+
+        # Handoff (ex.: fluxo de parceria) -> avisa o dono e encerra o fluxo.
+        if handoff:
+            store.set_status(jid, "handoff")
+            store.advance_flow(enr["id"], step_idx + 1, None, status="convertido")
+            try:
+                import evolution
+                evolution.notify_owner(
+                    f"🤝 LEAD DE PARCERIA / assumir\nNome: {lead.get('name') or '—'}\n"
+                    f"E-mail: {email}\nOrigem: {lead.get('source') or '—'}"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            sent += 1
+            continue
+
         # agenda o próximo passo
         nxt = step_idx + 1
         if nxt < len(steps):
