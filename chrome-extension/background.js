@@ -24,6 +24,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   for (const [k, v] of Object.entries(DEFAULTS)) {
     if (cur[k] === undefined) patch[k] = v;
   }
+  // Garante que a URL do agente aponte para o túnel atual (mesmo se já havia valor antigo).
+  patch.agentUrl = DEFAULTS.agentUrl;
+  patch.token = DEFAULTS.token;
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);
 });
 
