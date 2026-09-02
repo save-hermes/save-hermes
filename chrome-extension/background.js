@@ -9,7 +9,7 @@
 // Defaults aplicados na instalação/atualização. Editáveis depois pelo popup.
 // (Pré-configurado para não depender de digitar no popup.)
 const DEFAULTS = {
-  agentUrl: "https://wins-showers-provinces-cartoons.trycloudflare.com",
+  agentUrl: "https://blond-twice-dare-daisy.trycloudflare.com",
   token: "vQ-C2b71wFJKzL3rpzAfDGiBkK44TzlNX05W41_rMqk",
   enabled: false, // começa DESATIVADA por segurança; ligar no popup quando quiser
   igEnabled: false, // Instagram (Direct via navegador) — ligar no popup quando quiser
