@@ -542,3 +542,13 @@ def flow_stats() -> dict:
             "SELECT status, COUNT(*) n FROM flow_enrollments GROUP BY status"
         ).fetchall()
     return {r["status"]: r["n"] for r in rows}
+
+
+def intake_today() -> int:
+    """Quantos leads foram CAPTADOS (inscritos em fluxo) hoje — para o teto diário."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT COUNT(*) FROM flow_enrollments WHERE created_at>=?",
+            (_today_start(),),
+        ).fetchone()
+    return int(row[0]) if row else 0

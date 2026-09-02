@@ -119,6 +119,11 @@ FOLLOWUP_HOURS = os.getenv("FOLLOWUP_HOURS", "24,72,168").strip()
 FOLLOWUP_HOUR_START = int(os.getenv("FOLLOWUP_HOUR_START", "9"))   # 09h
 FOLLOWUP_HOUR_END = int(os.getenv("FOLLOWUP_HOUR_END", "20"))      # 20h
 
+# === Captação priorizada de leads do WEBSAVE ===
+# Quantos leads NOVOS a Vanessa capta/aborda por dia (teto diário de intake).
+# Prioridade: 1) WhatsApp+LP de produto recentes, 2) MQL (quiz), 3) webinário (pós-evento).
+WEBSAVE_DAILY_INTAKE = int(os.getenv("WEBSAVE_DAILY_INTAKE", "20"))
+
 
 def _digits(n: str) -> str:
     return "".join(ch for ch in (n or "") if ch.isdigit())

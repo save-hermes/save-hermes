@@ -35,10 +35,38 @@ DEFAULT_FLOW_STEPS = [
 
 
 def ensure_default_flow() -> None:
-    """Garante que o fluxo padrão existe no banco (idempotente)."""
+    """Garante que os fluxos padrão existem no banco (idempotente)."""
     if not store.get_flow(DEFAULT_FLOW_ID):
         store.upsert_flow(DEFAULT_FLOW_ID, "Nutrição — Reforma Tributária", DEFAULT_FLOW_STEPS)
         log.info("Fluxo padrão '%s' criado.", DEFAULT_FLOW_ID)
+    if not store.get_flow(MQL_FLOW_ID):
+        store.upsert_flow(MQL_FLOW_ID, "MQL — leads qualificados (quiz)", MQL_FLOW_STEPS)
+    if not store.get_flow(POSWEBINAR_FLOW_ID):
+        store.upsert_flow(POSWEBINAR_FLOW_ID, "Pós-webinário — aquecimento", POSWEBINAR_FLOW_STEPS)
+
+
+# Fluxo MQL (lead veio de quiz, já demonstrou intenção): aborda direto, mais consultivo.
+MQL_FLOW_ID = "mql_quiz"
+MQL_FLOW_STEPS = [
+    {"delay_h": 0,   "subject": "Sobre o seu diagnóstico",
+     "goal": "O lead respondeu um quiz/diagnóstico da Save (é um MQL, já demonstrou intenção). Aborde reconhecendo isso de forma consultiva: comente que viu o interesse dele no tema e pergunte qual a maior dificuldade prática hoje. NÃO empurre venda ainda; entenda o momento dele."},
+    {"delay_h": 48,  "subject": "Como resolver isso na prática",
+     "goal": "Conecte a dor típica de quem fez o diagnóstico à solução (Pré-Especialização: aplicação prática, diagnóstico de casos reais). Traga 1 argumento técnico forte. Convide a conhecer, sem forçar."},
+    {"delay_h": 120, "subject": "Detalhes da Pré-Especialização",
+     "goal": "E-mail de OFERTA. Apresente a oferta (R$ 197, campanha, parcelável), ancorando no valor de mercado e na garantia de 7 dias. Inclua o link de checkout. Chamada clara para a matrícula."},
+]
+
+# Fluxo pós-webinário: o lead se inscreveu num webinário cuja DATA JÁ PASSOU.
+# Primeiro aquece perguntando como foi a aula; só depois tenta vender.
+POSWEBINAR_FLOW_ID = "pos_webinario"
+POSWEBINAR_FLOW_STEPS = [
+    {"delay_h": 0,   "subject": "E aí, como foi a aula?",
+     "goal": "O lead se inscreveu num webinário/aula da Save que JÁ ACONTECEU. Aborde de forma leve e genuína perguntando o que ele achou da aula, se conseguiu assistir e se ficou alguma dúvida sobre o tema. NÃO venda nada aqui; é só aquecer e abrir conversa."},
+    {"delay_h": 72,  "subject": "Um passo além do que vimos na aula",
+     "goal": "Conecte o conteúdo do webinário à necessidade de ir além (do conceito para a prática). Apresente a Pré-Especialização como o próximo passo natural de quem gostou da aula. Argumento técnico, convite leve."},
+    {"delay_h": 168, "subject": "Condição da Pré-Especialização",
+     "goal": "E-mail de OFERTA para quem veio de webinário. Apresente a oferta (R$ 197, campanha, parcelável) com ancoragem de valor e garantia de 7 dias, incluindo o link de checkout. Chamada clara."},
+]
 
 
 def within_business_hours(now: float | None = None) -> bool:

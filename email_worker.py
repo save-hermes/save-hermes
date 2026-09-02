@@ -186,6 +186,32 @@ def poll_inbox_once() -> dict:
     return {"read": len(mails), "answered": sum(1 for r in results if r.get("ok") and r.get("reply"))}
 
 
+_last_intake_day = [None]
+
+
+def _maybe_daily_intake() -> None:
+    """Roda a captação priorizada do WEBSAVE 1x por dia (dentro do horário comercial)."""
+    import datetime
+    import websave_sync
+    import websave_mcp
+    if not websave_mcp.configured():
+        return
+    import followup
+    if not followup.within_business_hours():
+        return
+    today = datetime.date.today().isoformat()
+    if _last_intake_day[0] == today:
+        return
+    _last_intake_day[0] = today
+    try:
+        r = websave_sync.run_intake(dry_run=False)
+        if r.get("captados"):
+            log.info("Intake diário WEBSAVE: %s leads captados (teto %s)",
+                     r["captados"], r.get("teto_dia"))
+    except Exception as e:  # noqa: BLE001
+        log.error("Falha no intake diário WEBSAVE: %s", e)
+
+
 def run_loop(interval_s: int = 60) -> None:
     """Loop: a cada `interval_s`, lê a caixa e roda os follow-ups vencidos."""
     import followup, flows
@@ -197,17 +223,27 @@ def run_loop(interval_s: int = 60) -> None:
     )
     while True:
         try:
+            # PRIORIDADE: receptivo (inbound) SEMPRE antes de ativo (outbound).
+            # 1) Responder quem escreveu (leads que levantaram a mão são mais quentes).
+            inbound_pendente = 0
             if email_client.configured():
                 r = poll_inbox_once()
+                inbound_pendente = r["read"]
                 if r["read"]:
                     log.info("Inbox: %s lidos, %s respondidos", r["read"], r["answered"])
+            # 2) Follow-up de quem já está em conversa.
             fr = followup.run_once(deliver_wa=deliver_wa, deliver_email=deliver_email)
             if fr.get("sent"):
                 log.info("Follow-up: %s enviados (de %s vencidos)", fr["sent"], fr.get("due"))
-            # Motor de fluxos de e-mail marketing (nutrição automática)
+            # 3) Nutrição dos leads já captados (fluxos em andamento).
             cr = flows.run_once(deliver_email=deliver_email)
             if cr.get("sent"):
                 log.info("Fluxo mkt: %s e-mails enviados (de %s vencidos)", cr["sent"], cr.get("due"))
+            # 4) ATIVO por último: captar leads NOVOS do WEBSAVE (1x/dia, teto).
+            #    Só capta lead frio novo quando NÃO há receptivo pendente neste ciclo,
+            #    para o receptivo sempre ter prioridade sobre o ativo.
+            if inbound_pendente == 0:
+                _maybe_daily_intake()
         except Exception as e:  # noqa: BLE001
             log.error("Erro no loop do email_worker: %s", e)
         time.sleep(interval_s)

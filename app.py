@@ -539,3 +539,21 @@ async def websave_sync(request: Request):
         max_leads=int(body.get("max_leads", 100)),
         dry_run=bool(body.get("dry_run", True)),
     )
+
+
+@app.post("/websave/intake")
+async def websave_intake(request: Request):
+    """Captação PRIORIZADA com teto diário (Tier 1 LP → 2 MQL → 3 webinário).
+
+    Body: {"daily_cap":20, "dry_run":true}. dry_run=true (padrão) só simula.
+    A Vanessa aborda no máx. `daily_cap` leads novos/dia, na ordem de prioridade.
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import websave_sync
+    body = await request.json() if await request.body() else {}
+    cap = body.get("daily_cap")
+    return websave_sync.run_intake(
+        daily_cap=int(cap) if cap is not None else None,
+        dry_run=bool(body.get("dry_run", True)),
+    )
