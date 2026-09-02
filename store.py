@@ -43,6 +43,24 @@ CREATE TABLE IF NOT EXISTS email_sends (
     subject     TEXT,
     ts          INTEGER
 );
+CREATE TABLE IF NOT EXISTS flows (
+    id          TEXT PRIMARY KEY,     -- slug do fluxo, ex.: 'boas_vindas'
+    name        TEXT,
+    steps_json  TEXT,                 -- lista de passos [{delay_h, goal, subject_hint}]
+    enabled     INTEGER DEFAULT 1,
+    created_at  INTEGER
+);
+CREATE TABLE IF NOT EXISTS flow_enrollments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    jid         TEXT,                 -- lead inscrito
+    flow_id     TEXT,                 -- qual fluxo
+    step        INTEGER DEFAULT 0,    -- próximo passo a enviar
+    next_at     INTEGER,              -- quando disparar o próximo passo
+    status      TEXT DEFAULT 'ativo', -- ativo|concluido|cancelado|convertido
+    created_at  INTEGER,
+    updated_at  INTEGER,
+    UNIQUE(jid, flow_id)
+);
 """
 
 
@@ -61,6 +79,7 @@ _EXTRA_COLUMNS = {
     "next_followup_at": "INTEGER",  # epoch do próximo follow-up agendado (NULL = nenhum)
     "last_inbound_at":  "INTEGER",  # epoch da última mensagem recebida do lead
     "opted_out":        "INTEGER",  # 1 = pediu para parar (nunca mais follow-up)
+    "source":           "TEXT",     # origem: lista | whatsapp | formulario | instagram | manual
 }
 
 
@@ -432,3 +451,94 @@ def recent_email_events(limit: int = 30) -> list[dict]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ───────────────────────── Fluxos de e-mail (campanhas automatizadas) ─────────────────────────
+
+def upsert_flow(flow_id: str, name: str, steps: list[dict], enabled: bool = True) -> None:
+    """Cria/atualiza um fluxo. steps = [{delay_h, goal, subject_hint}, ...]."""
+    import json
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO flows (id, name, steps_json, enabled, created_at)
+                 VALUES (?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET name=excluded.name,
+                 steps_json=excluded.steps_json, enabled=excluded.enabled""",
+            (flow_id, name, json.dumps(steps, ensure_ascii=False), 1 if enabled else 0, int(time.time())),
+        )
+
+
+def get_flow(flow_id: str) -> dict | None:
+    import json
+    with _conn() as c:
+        row = c.execute("SELECT * FROM flows WHERE id=?", (flow_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["steps"] = json.loads(d.get("steps_json") or "[]")
+    return d
+
+
+def list_flows() -> list[dict]:
+    import json
+    with _conn() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM flows ORDER BY created_at").fetchall()]
+    for d in rows:
+        d["steps"] = json.loads(d.get("steps_json") or "[]")
+    return rows
+
+
+def enroll_in_flow(jid: str, flow_id: str, first_delay_h: float = 0) -> bool:
+    """Inscreve um lead num fluxo (idempotente por jid+flow). Retorna False se já estava."""
+    now = int(time.time())
+    next_at = now + int(first_delay_h * 3600)
+    with _conn() as c:
+        exists = c.execute(
+            "SELECT 1 FROM flow_enrollments WHERE jid=? AND flow_id=?", (jid, flow_id)
+        ).fetchone()
+        if exists:
+            return False
+        c.execute(
+            """INSERT INTO flow_enrollments (jid, flow_id, step, next_at, status, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?)""",
+            (jid, flow_id, 0, next_at, "ativo", now, now),
+        )
+    return True
+
+
+def due_flow_steps(now: int | None = None) -> list[dict]:
+    """Inscrições ativas cujo próximo passo venceu."""
+    now = now or int(time.time())
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT * FROM flow_enrollments
+                 WHERE status='ativo' AND next_at IS NOT NULL AND next_at <= ?
+                 ORDER BY next_at ASC""",
+            (now,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def advance_flow(enrollment_id: int, next_step: int, next_at: int | None, status: str = "ativo") -> None:
+    with _conn() as c:
+        c.execute(
+            "UPDATE flow_enrollments SET step=?, next_at=?, status=?, updated_at=? WHERE id=?",
+            (next_step, next_at, status, int(time.time()), enrollment_id),
+        )
+
+
+def cancel_flows_for(jid: str, reason: str = "cancelado") -> None:
+    """Cancela todas as inscrições ativas de um lead (ex.: respondeu, comprou, opt-out)."""
+    with _conn() as c:
+        c.execute(
+            "UPDATE flow_enrollments SET status=?, next_at=NULL, updated_at=? WHERE jid=? AND status='ativo'",
+            (reason, int(time.time()), jid),
+        )
+
+
+def flow_stats() -> dict:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT status, COUNT(*) n FROM flow_enrollments GROUP BY status"
+        ).fetchall()
+    return {r["status"]: r["n"] for r in rows}

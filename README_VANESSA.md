@@ -91,10 +91,24 @@ python test_e2e.py              # 9 testes: WhatsApp (admin, injeção, grupos, 
 ## 📤 Prospecção e ações por API (protegidas por ?token=WEBHOOK_TOKEN)
 
 ```
+POST /leads/ingest     # PORTA ÚNICA de leads (lista/formulário/WhatsApp) → Vanessa atende sozinha
+                       # 1 lead: {"email","name","number","source","flow","seed"}
+                       # lista:  {"leads":[ {...}, {...} ]}
+POST /flows/run        # dispara passos de fluxo de nutrição vencidos agora
+GET  /flows            # lista fluxos + estatísticas de inscrições
 POST /email/outreach   {"to":"lead@x.com","name":"Ana","seed":"veio do anúncio"}
 POST /email/poll        # lê a caixa uma vez
 POST /followup/run      # dispara follow-ups vencidos agora
 ```
+
+### 🔄 Fluxos de nutrição (e-mail marketing autônomo)
+- Um lead com e-mail que entra pelo `/leads/ingest` é **inscrito automaticamente** no
+  fluxo `nutricao_reforma` (dia 0/2/4/6): boas-vindas → conteúdo → prova → oferta.
+- A **Vanessa gera o texto de cada e-mail** (persona + base), dispara pelo Resend.
+- **Gatilhos automáticos:** se o lead **responder** (WhatsApp ou e-mail), sai do fluxo
+  e vira atendimento 1:1; **opt-out** cancela; ao fim, status `concluido`.
+- Só dispara em horário comercial. O painel mostra: em nutrição / concluíram /
+  responderam / saíram.
 
 ---
 

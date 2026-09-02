@@ -78,6 +78,9 @@ def process_inbound_email(mail: dict) -> dict:
     store.set_email(jid, addr)
     store.add_message(jid, "user", body)
     store.record_inbound(jid)  # respondeu -> zera régua de follow-up
+    # respondeu -> sai do fluxo de nutrição de mkt (vira atendimento 1:1)
+    import flows
+    flows.on_lead_replied(jid)
 
     # Limite diário de e-mail.
     if config.EMAIL_DAILY_LIMIT > 0 and store.emails_sent_today() >= config.EMAIL_DAILY_LIMIT:
@@ -157,8 +160,9 @@ def poll_inbox_once() -> dict:
 
 def run_loop(interval_s: int = 60) -> None:
     """Loop: a cada `interval_s`, lê a caixa e roda os follow-ups vencidos."""
-    import followup
+    import followup, flows
     store.init()
+    flows.ensure_default_flow()
     log.info(
         "email_worker iniciado. email_configured=%s followup_enabled=%s intervalo=%ss",
         email_client.configured(), config.FOLLOWUP_ENABLED, interval_s,
@@ -172,6 +176,10 @@ def run_loop(interval_s: int = 60) -> None:
             fr = followup.run_once(deliver_wa=deliver_wa, deliver_email=deliver_email)
             if fr.get("sent"):
                 log.info("Follow-up: %s enviados (de %s vencidos)", fr["sent"], fr.get("due"))
+            # Motor de fluxos de e-mail marketing (nutrição automática)
+            cr = flows.run_once(deliver_email=deliver_email)
+            if cr.get("sent"):
+                log.info("Fluxo mkt: %s e-mails enviados (de %s vencidos)", cr["sent"], cr.get("due"))
         except Exception as e:  # noqa: BLE001
             log.error("Erro no loop do email_worker: %s", e)
         time.sleep(interval_s)

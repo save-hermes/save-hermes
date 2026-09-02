@@ -37,6 +37,11 @@ app.add_middleware(
 @app.on_event("startup")
 def _startup() -> None:
     store.init()
+    try:
+        import flows
+        flows.ensure_default_flow()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Falha ao garantir fluxo padrão: %s", e)
     missing = config.validate()
     if missing:
         log.warning("VARIÁVEIS FALTANDO no ambiente: %s", ", ".join(missing))
@@ -131,6 +136,11 @@ def _process(info: dict, deliver: bool) -> dict:
     store.add_message(jid, "user", info["text"])
     if not is_admin:
         store.record_inbound(jid)  # lead respondeu -> zera régua de follow-up
+        try:
+            import flows
+            flows.on_lead_replied(jid)  # respondeu -> sai do fluxo de mkt
+        except Exception:  # noqa: BLE001
+            pass
 
     # Limite diário de envio (warming) — admin nunca é limitado.
     if not is_admin and config.DAILY_SEND_LIMIT > 0:
@@ -464,3 +474,48 @@ async def resend_webhook(request: Request):
         return {"ignored": "missing_fields"}
     store.record_email_event(email_id, etype, recipient=recipient, subject=subject, raw=raw.decode("utf-8", "replace"))
     return {"ok": True, "type": etype}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INGEST DE LEADS + FLUXOS — porta única de entrada (lista/formulário/WhatsApp)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/leads/ingest")
+async def leads_ingest(request: Request):
+    """Porta ÚNICA de entrada de leads. A Vanessa assume o atendimento sozinha.
+
+    Aceita 1 lead {email,name,number,source,flow,seed} ou lista {"leads":[...]}.
+    Protegido por ?token=WEBHOOK_TOKEN. Cada lead com e-mail entra no fluxo de
+    nutrição automaticamente (a menos que flow="" desligue).
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import flows
+    body = await request.json()
+    items = body.get("leads") if isinstance(body, dict) and "leads" in body else [body]
+    results = []
+    for it in items:
+        flow = it.get("flow", flows.DEFAULT_FLOW_ID)
+        results.append(flows.ingest_lead(
+            email=it.get("email", ""), name=it.get("name", ""),
+            number=it.get("number", ""), source=it.get("source", "manual"),
+            flow_id=(flow or None), seed=it.get("seed", ""),
+        ))
+    return {"ok": True, "count": len(results), "results": results}
+
+
+@app.post("/flows/run")
+async def flows_run(request: Request):
+    """Dispara os passos de fluxo vencidos agora (teste/cron externo)."""
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import flows, email_worker
+    return flows.run_once(deliver_email=email_worker.deliver_email)
+
+
+@app.get("/flows")
+async def flows_list(request: Request):
+    """Lista os fluxos e estatísticas de inscrições."""
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {"flows": store.list_flows(), "enrollments": store.flow_stats()}

@@ -238,6 +238,21 @@ respondeu ao último contato. Objetivo: retomar com leveza, sem soar cobrando.
 - NÃO escreva assunto nem assinatura no corpo (o sistema cuida disso).
 - Se perceber que a pessoa não quer, respeite: um último e-mail cordial e pare.
 """,
+        "email_campaign": """
+═══════════ CANAL: E-MAIL DE FLUXO (NUTRIÇÃO / MARKETING) ═══════════
+Este e-mail faz parte de uma SEQUÊNCIA automatizada de nutrição de leads. Cada
+passo tem um OBJETIVO específico (informado abaixo). Regras:
+- Escreva de acordo com o OBJETIVO DO PASSO (boas-vindas, conteúdo/educação,
+  prova, oferta, urgência, última chamada) — mantido no fim deste prompt.
+- Humano, direto, enxuto (2 a 5 frases). Uma ideia central por e-mail.
+- Continue a persona Vanessa: técnico, específico, sem linguagem de "vendedor de
+  plantão", sem urgência fabricada, sem as palavras em quarentena.
+- Preço/link só o que está na base (R$ 197 / checkout). Nunca invente.
+- Termine com UM próximo passo claro (uma pergunta ou o link, conforme o passo).
+- NÃO escreva assunto nem assinatura no corpo (o sistema cuida disso).
+- Como é lista/nutrição, o pé do e-mail terá opção de descadastro (o sistema
+  adiciona) — não precisa escrever isso.
+""",
     }.get(channel, "")
 
     import knowledge
@@ -293,7 +308,7 @@ Você NÃO tem preço, link ou dados de produto para dar aqui, e não deve inven
 Responda SEMPRE como um comentário curto e natural (1 a 2 frases)."""
 
     # Instrução de formato final varia por canal (WhatsApp vs. e-mail).
-    if channel in ("email", "email_followup"):
+    if channel in ("email", "email_followup", "email_campaign"):
         fechamento_formato = (
             "Escreva APENAS o corpo do e-mail (sem linha de assunto e sem assinatura), "
             "em português do Brasil, humano e enxuto conforme as regras do canal acima."

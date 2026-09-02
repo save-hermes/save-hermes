@@ -59,6 +59,11 @@ def api_email_metrics():
     return {"metrics": store.email_metrics(), "events": store.recent_email_events(limit=20)}
 
 
+@app.get("/api/flows")
+def api_flows():
+    return {"flows": store.list_flows(), "enrollments": store.flow_stats()}
+
+
 @app.post("/api/lead/status")
 async def api_set_status(request: Request):
     body = await request.json()
