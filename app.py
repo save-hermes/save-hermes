@@ -521,3 +521,21 @@ async def flows_list(request: Request):
     if request.query_params.get("token") != config.WEBHOOK_TOKEN:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return {"flows": store.list_flows(), "enrollments": store.flow_stats()}
+
+
+@app.post("/websave/sync")
+async def websave_sync(request: Request):
+    """Puxa leads do WEBSAVE (MCP) para a nutrição da Vanessa.
+
+    Body: {"origem":"lp|quiz|webinario", "max_leads":100, "dry_run":true}
+    dry_run=true (padrão) só mostra o que faria. Protegido por ?token=.
+    """
+    if request.query_params.get("token") != config.WEBHOOK_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import websave_sync
+    body = await request.json() if await request.body() else {}
+    return websave_sync.sync_leads(
+        origem=body.get("origem", "lp"),
+        max_leads=int(body.get("max_leads", 100)),
+        dry_run=bool(body.get("dry_run", True)),
+    )

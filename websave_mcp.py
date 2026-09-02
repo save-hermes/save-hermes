@@ -125,3 +125,30 @@ def status() -> dict:
                 "tool_names": [t["name"] for t in tools]}
     except Exception as e:  # noqa: BLE001
         return {"configured": True, "error": str(e)[:120]}
+
+
+# ─────────── Parsing dos leads (as tools devolvem markdown) ───────────
+
+import re as _re
+
+_LEAD_LINE = _re.compile(r"-\s+\*\*(?P<nome>.+?)\*\*\s+<(?P<email>[^>]+)>")
+_TOTAL = _re.compile(r"Mostrando\s+\d+\s+de\s+(\d+)")
+
+
+def parse_leads(md: str) -> list[dict]:
+    """Extrai [{nome,email}] de uma resposta markdown de save_listar_leads."""
+    out = []
+    for m in _LEAD_LINE.finditer(md or ""):
+        out.append({"nome": m.group("nome").strip(), "email": m.group("email").strip().lower()})
+    return out
+
+
+def total_leads(md: str) -> int:
+    m = _TOTAL.search(md or "")
+    return int(m.group(1)) if m else 0
+
+
+def fetch_leads_page(origem: str = "lp", limit: int = 50, offset: int = 0) -> tuple[list[dict], int]:
+    """Devolve (leads_da_pagina, total). origem: lp | quiz | webinario."""
+    md = listar_leads(origem=origem, limit=limit, offset=offset)
+    return parse_leads(md), total_leads(md)
