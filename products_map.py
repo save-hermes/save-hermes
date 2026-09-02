@@ -40,6 +40,22 @@ LP_MAP = {
 # Produto-âncora quando não há mapeamento específico.
 PRODUTO_ANCORA = "Pré-Especialização em Reforma Tributária"
 
+# Ordem de preço (do mais BARATO ao mais caro) — usada no fallback quando a LP
+# não aponta um produto claro: a Vanessa sugere o mais acessível primeiro,
+# salvo se o cliente pedir um produto específico. Preços da base (podem ter
+# condição de lançamento; a Vanessa confirma na base antes de citar valor).
+PRODUTOS_POR_PRECO = [
+    "Semana Prática de Transação Tributária",          # ~R$ 197
+    "Pré-Especialização em Reforma Tributária",        # ~R$ 197 (campanha)
+    "Passaporte Tributário",                           # ~R$ 1.997
+    "Pós-Graduação em Direito Tributário Pré e Pós-Reforma",   # alto valor (negociado)
+    "Pós-Graduação em Prática de Recuperação de Créditos Tributário",
+    "Combo 2 Pós-Graduações (Direito Tributário + Recuperação de Créditos)",
+]
+
+# Produto de entrada (mais barato) para o fallback "mais barato primeiro".
+PRODUTO_ENTRADA = PRODUTOS_POR_PRECO[0]
+
 
 def lookup(lp_slug: str) -> dict:
     """Devolve {produto, intencao} para um slug de LP (ou o âncora, venda_curso)."""

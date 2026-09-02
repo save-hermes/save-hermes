@@ -173,9 +173,17 @@ def run_once(deliver_email=None) -> dict:
             import products_map
             src = (lead.get("source") or "")
             slug = src.split("lp:", 1)[1] if "lp:" in src else ""
-            info = products_map.lookup(slug) if slug else {"produto": products_map.PRODUTO_ANCORA, "intencao": "venda_curso"}
-            produto_ctx = (f"[PRODUTO/INTENÇÃO DESTE LEAD] Produto a promover: {info['produto']}. "
-                           f"Intenção: {info['intencao']}. Ofereça ESTE produto, não outro.")
+            if slug:
+                info = products_map.lookup(slug)
+                produto_ctx = (f"[PRODUTO/INTENÇÃO DESTE LEAD] Este lead veio da LP de "
+                               f"'{info['produto']}'. Promova ESTE produto (foi o que ele "
+                               f"demonstrou interesse). Intenção: {info['intencao']}.")
+            else:
+                # Sem LP clara: postura consultiva, produto mais acessível como ponto de partida.
+                produto_ctx = (f"[PRODUTO/INTENÇÃO DESTE LEAD] Origem não aponta um produto "
+                               f"específico. Seja consultiva: entenda a necessidade antes de "
+                               f"ofertar. Em igualdade, comece pelo mais acessível "
+                               f"('{products_map.PRODUTO_ENTRADA}'). Não abra com preço.")
         except Exception:  # noqa: BLE001
             pass
 
