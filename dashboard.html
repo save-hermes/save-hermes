@@ -87,6 +87,18 @@
   .sheet .top{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
   .sheet .top .x{margin-left:auto;cursor:pointer;color:var(--muted-foreground);font-size:22px;background:none;border:none;line-height:1}
   .conv{padding:18px 20px;overflow:auto;flex:1;background:var(--muted)}
+  .pront{padding:14px 20px;border-bottom:1px solid var(--border);background:#fff;max-height:240px;overflow:auto}
+  .pront-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin-bottom:10px}
+  .pront .pd{display:flex;justify-content:space-between;gap:10px;font-size:13px;border-bottom:1px dashed var(--border);padding:3px 0}
+  .pront .pd span{color:var(--muted-foreground)}
+  .pront .pd b{color:var(--ink);font-weight:500;text-align:right;word-break:break-word}
+  .ws-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);margin:2px 0 5px}
+  .ws-box{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.55;color:var(--ink-soft);white-space:pre-wrap}
+  .tabs{display:flex;gap:6px;padding:10px 20px 0;background:#fff;border-bottom:1px solid var(--border)}
+  .tabs .tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted-foreground);
+    font-size:13px;font-family:var(--font-sans);padding:7px 10px 9px;cursor:pointer;font-weight:400}
+  .tabs .tab:hover{color:var(--ink)}
+  .tabs .tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:500}
   .msg{margin-bottom:14px;display:flex}
   .msg .b{max-width:78%;padding:10px 14px;border-radius:12px;white-space:pre-wrap;font-size:14px;line-height:1.45}
   .msg.user .b{background:#fff;border:1px solid var(--border);color:var(--ink)}
@@ -164,6 +176,21 @@
       </div>
       <button class="x" onclick="closeModal()">×</button>
     </div>
+
+    <!-- Prontuário: dados da pessoa + o que o WEBSAVE sabe -->
+    <div class="pront" id="m-pront">
+      <div class="pront-grid" id="m-dados"></div>
+      <div class="pront-ws" id="m-ws"><div class="mut" style="font-size:12px">Carregando prontuário do WEBSAVE…</div></div>
+    </div>
+
+    <!-- Abas por canal -->
+    <div class="tabs" id="m-tabs">
+      <button class="tab on" data-ch="all" onclick="setTab('all')">Tudo</button>
+      <button class="tab" data-ch="whatsapp" onclick="setTab('whatsapp')">🟢 WhatsApp</button>
+      <button class="tab" data-ch="instagram" onclick="setTab('instagram')">📷 Instagram</button>
+      <button class="tab" data-ch="email" onclick="setTab('email')">✉️ E-mail</button>
+    </div>
+
     <div class="conv" id="m-conv"></div>
     <div class="actions">
       <span class="meta" id="m-meta"></span>
@@ -183,7 +210,27 @@ const $ = s => document.querySelector(s);
 const CH = {whatsapp:'🟢 WhatsApp', email:'✉️ E-mail', instagram:'📷 Instagram'};
 const fmt = ts => ts ? new Date(ts*1000).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 const initials = n => (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase() || '?';
-let curJid = null;
+let curJid = null, curMsgs = [], curTab = 'all';
+
+function msgChannel(m, leadCh){
+  const c = (m.content||'');
+  if(/^\[fluxo:|\[email|^assunto:|^Assunto:/i.test(c) || m.channel==='email') return 'email';
+  if(m.channel) return m.channel;
+  return leadCh||'whatsapp';
+}
+function setTab(ch){
+  curTab = ch;
+  document.querySelectorAll('#m-tabs .tab').forEach(b=>b.classList.toggle('on', b.dataset.ch===ch));
+  renderConv();
+}
+function renderConv(){
+  const leadCh = window._leadCh||'whatsapp';
+  const list = curMsgs.filter(m => curTab==='all' || msgChannel(m,leadCh)===curTab);
+  $('#m-conv').innerHTML = list.map(m=>
+    `<div class="msg ${m.role}"><div><div class="b">${(m.content||'').replace(/</g,'&lt;')}</div><div class="t">${(CH[msgChannel(m,leadCh)]||'').split(' ')[0]} ${fmt(m.ts)}</div></div></div>`
+  ).join('') || '<div class="empty">Sem registros neste canal.</div>';
+  const c=$('#m-conv'); c.scrollTop=c.scrollHeight;
+}
 
 async function loadStats(){
   const s = await (await fetch('/api/stats')).json();
@@ -251,20 +298,45 @@ async function loadFlows(){
 }
 
 async function openLead(jid){
-  curJid = jid;
+  curJid = jid; curTab='all';
   const d = await (await fetch('/api/lead?jid='+encodeURIComponent(jid))).json();
   $('#m-av').textContent = initials(d.name);
   $('#m-name').textContent = d.name || '(sem nome)';
-  const ch = d.channel_derived||'whatsapp';
+  const ch = d.channel_derived||'whatsapp'; window._leadCh = ch;
   $('#m-sub').textContent = (CH[ch]||ch)+' · '+(d.email||d.number||'');
   $('#m-status').value = d.status||'novo';
   const fu = d.next_followup_at ? 'Próx. follow-up: '+fmt(d.next_followup_at)+' (etapa '+(d.followup_stage||0)+')' : 'Sem follow-up agendado';
   $('#m-meta').textContent = (d.opted_out? '🚫 opt-out · ':'')+fu;
-  $('#m-conv').innerHTML = (d.messages||[]).map(m=>
-    `<div class="msg ${m.role}"><div><div class="b">${(m.content||'').replace(/</g,'&lt;')}</div><div class="t">${fmt(m.ts)}</div></div></div>`
-  ).join('') || '<div class="empty">Sem mensagens.</div>';
+
+  // Dados básicos do prontuário (do CRM local)
+  const dado = (l,v)=> v ? `<div class="pd"><span>${l}</span><b>${(''+v).replace(/</g,'&lt;')}</b></div>` : '';
+  const srcTxt = (d.source||'').replace('websave_lp:','LP: ').replace('websave_','');
+  $('#m-dados').innerHTML =
+    dado('E-mail', d.email)+dado('WhatsApp', (d.number&&d.number.includes('@'))? '':d.number)+
+    dado('Origem', srcTxt)+dado('Status', d.status)+
+    dado('Entrou', fmt(d.created_at))+dado('Últ. atividade', fmt(d.updated_at));
+
+  curMsgs = d.messages||[];
+  document.querySelectorAll('#m-tabs .tab').forEach(b=>b.classList.toggle('on', b.dataset.ch==='all'));
+  renderConv();
   $('#modal').classList.add('on');
-  const c=$('#m-conv'); c.scrollTop=c.scrollHeight;
+
+  // Prontuário do WEBSAVE (assíncrono — perfil consolidado + histórico)
+  $('#m-ws').innerHTML = '<div class="mut" style="font-size:12px">Carregando prontuário do WEBSAVE…</div>';
+  try{
+    const p = await (await fetch('/api/lead/prontuario?jid='+encodeURIComponent(jid))).json();
+    const ws = p.websave||{};
+    if(ws.erro && !ws.perfil){
+      $('#m-ws').innerHTML = '<div class="ws-h">📋 Prontuário WEBSAVE</div><div class="mut" style="font-size:12px">'+ws.erro+'</div>';
+    } else {
+      const perfil = (ws.perfil||'').replace(/</g,'&lt;');
+      const hist = (ws.historico||'').replace(/</g,'&lt;');
+      $('#m-ws').innerHTML =
+        '<div class="ws-h">📋 Prontuário WEBSAVE</div>'+
+        (perfil? '<div class="ws-box">'+perfil+'</div>':'')+
+        (hist? '<div class="ws-h" style="margin-top:8px">🕑 Histórico no sistema</div><div class="ws-box">'+hist+'</div>':'');
+    }
+  }catch(e){ $('#m-ws').innerHTML = '<div class="mut" style="font-size:12px">Prontuário indisponível.</div>'; }
 }
 function closeModal(){ $('#modal').classList.remove('on'); curJid=null; }
 

@@ -49,6 +49,45 @@ def api_lead(jid: str):
     return d
 
 
+@app.get("/api/lead/prontuario")
+def api_lead_prontuario(jid: str):
+    """Prontuário do lead vindo do WEBSAVE (perfil consolidado + histórico do sistema).
+
+    Junta os dados que a Vanessa tem no CRM local com o que o sistema de webinars
+    sabe sobre a pessoa (inscrições, presença, compras, quizzes, LP de origem).
+    """
+    d = store.lead_detail(jid)
+    if not d:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    email = d.get("email") or ""
+    perfil, historico, erro = None, None, None
+    if email:
+        try:
+            import websave_mcp
+            if websave_mcp.configured():
+                perfil = websave_mcp.buscar_lead(email)
+                historico = websave_mcp.historico_lead(email)
+        except Exception as e:  # noqa: BLE001
+            erro = str(e)
+    else:
+        erro = "sem e-mail para consultar o WEBSAVE"
+    return {
+        "jid": jid,
+        "nome": d.get("name"),
+        "email": email,
+        "numero": d.get("number"),
+        "status": d.get("status"),
+        "source": d.get("source"),
+        "canal": d.get("channel_derived"),
+        "criado_em": d.get("created_at"),
+        "atualizado_em": d.get("updated_at"),
+        "opted_out": d.get("opted_out"),
+        "followup_stage": d.get("followup_stage"),
+        "next_followup_at": d.get("next_followup_at"),
+        "websave": {"perfil": perfil, "historico": historico, "erro": erro},
+    }
+
+
 @app.get("/api/activity")
 def api_activity(limit: int = 40):
     return {"activity": store.recent_activity(limit=limit)}
